@@ -20,22 +20,33 @@ int port;//set to 69
 
 int paramCheck(std::string arguments){
 
-    if (arguments[0] != '-' || arguments[2] != ' ' || arguments[3] != '-' || arguments[4] != 'd' || arguments[5] != ' '){
-        fprintf(stderr, "Missing or invalid arguments\n");
-        exit(1);
-    }
-    if (arguments[1] == 'W'){
-        read = false;
-    }else if(arguments[1] == 'R'){
-        read = true;
-    }else{
-        fprintf(stderr, "Missing or invalid arguments\n");
-        exit(1);
-    }
-    arguments = arguments.substr(6);
-    path = arguments.substr(0, arguments.find(' '));
-    arguments = arguments.substr(arguments.find(' ')+1);
     arguments = arguments.append(" ");
+    //whitespace reduction
+    int i = 0;
+    while (i < (int) arguments.length()){
+        if (isspace(arguments[i])){
+            if (i == 0){
+                arguments.erase(arguments.begin());
+                continue;
+            }
+            if (isspace(arguments[i-1])){
+                arguments.erase(arguments.begin()+i);
+                continue;
+            }
+            arguments[i] = ' ';
+        }
+        i++;
+    }
+    if (arguments.find(",") != std::string::npos){
+        int pos = arguments.find(",");
+        if (isspace(arguments[pos-1])){
+            arguments.erase(arguments.begin()+pos-1);
+        }
+        pos = arguments.find(",");
+        if (isspace(arguments[pos+1])){
+            arguments.erase(arguments.begin()+pos+1);
+        }
+    }
 
     while (arguments.length() != 0){
         std::string arg = arguments.substr(0, arguments.find(' '));
@@ -43,17 +54,28 @@ int paramCheck(std::string arguments){
         std::string value = arguments.substr(0, arguments.find(' '));
         arguments = arguments.substr(arguments.find(' ')+1);
         
-        if (arg == "-t"){
-            timeout = std::stoi(value);
-            std::cout << "-t value is:" << timeout << ":\n";
-        }else if (arg == "-s"){
-            size = std::stoi(value);
-            std::cout << "-s value is:" << size << ":\n";
+        if (arg == "-W"){
+            read = false;
+            value = value.append(" ");
+            arguments = value.append(arguments);
+        }else if (arg == "-R"){
+            read = true;
+            value = value.append(" ");
+            arguments = value.append(arguments);
         }else if (arg == "-m"){
             multicast = true;
             value = value.append(" ");
             arguments = value.append(arguments);
             std::cout << "-m value is:" << multicast << ":\n";
+        }else if (arg == "-d"){
+            path = value;
+            std::cout << "-d value is:" << path << ":\n";
+        }else if (arg == "-t"){
+            timeout = std::stoi(value);
+            std::cout << "-t value is:" << timeout << ":\n";
+        }else if (arg == "-s"){
+            size = std::stoi(value);
+            std::cout << "-s value is:" << size << ":\n";
         }else if (arg == "-c"){
             mode = value;
             std::cout << "-c value is:" << mode << ":\n";
@@ -64,7 +86,6 @@ int paramCheck(std::string arguments){
         }
         std::cout << "The rest is:" << arguments << ":\n\n";
     }
-
 
     return 1;
 }
