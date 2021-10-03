@@ -9,13 +9,28 @@
 
 bool read;
 std::string path;
-int timeout; //set to zero
-int size; //zistit na co nastavit
-bool multicast; //set to false
-std::string mode; //set to "binary"
-std::string adress;//set to 127.0.0.1
-int port;//set to 69
+int timeout;
+int size;
+bool multicast;
+std::string mode;
+bool ipv4;
+std::string adress;
+int port;
 
+
+
+void paramSet(){
+
+    read = true;
+    path = "";
+    timeout = -1;
+    size = 512;//TODO este zistit
+    multicast = false;
+    mode = "binary";
+    ipv4 = true;
+    adress = "127.0.0.1";
+    port = 69;
+}
 
 
 int paramCheck(std::string arguments){
@@ -66,25 +81,44 @@ int paramCheck(std::string arguments){
             multicast = true;
             value = value.append(" ");
             arguments = value.append(arguments);
-            std::cout << "-m value is:" << multicast << ":\n";
+            //std::cout << "-m value is:" << multicast << ":\n";
         }else if (arg == "-d"){
             path = value;
-            std::cout << "-d value is:" << path << ":\n";
+            //std::cout << "-d value is:" << path << ":\n";
         }else if (arg == "-t"){
-            timeout = std::stoi(value);
-            std::cout << "-t value is:" << timeout << ":\n";
+            try{
+                timeout = std::stoi(value);
+            }catch (...){
+                std::cerr << "PARAM ERR: timeout value must be integer\n";
+                exit(1);
+            }
+            //std::cout << "-t value is:" << timeout << ":\n";
         }else if (arg == "-s"){
-            size = std::stoi(value);
-            std::cout << "-s value is:" << size << ":\n";
+            try{
+                size = std::stoi(value);
+            }catch (...){
+                std::cerr << "PARAM ERR: size value must be integer\n";
+                exit(1);
+            }
+            //std::cout << "-s value is:" << size << ":\n";
         }else if (arg == "-c"){
             mode = value;
-            std::cout << "-c value is:" << mode << ":\n";
+            if (mode != "ascii" && mode != "netascii" && mode != "binary" && mode != "octet"){
+                std::cerr << "PARAM ERR: unknown mode\n";
+                exit(1);
+            }
+            //std::cout << "-c value is:" << mode << ":\n";
         }else if (arg == "-a"){
             adress = value.substr(0, value.find(','));
-            port = std::stoi(value.substr(value.find(',')+1));
-            std::cout << "-a value is:" << adress << "," << port << ":\n";
+            try{
+                port = std::stoi(value.substr(value.find(',')+1));
+            }catch (...){
+                std::cerr << "PARAM ERR: port number must be integer\n";
+                exit(1);
+            }
+            //std::cout << "-a value is:" << adress << "," << port << ":\n";
         }
-        std::cout << "The rest is:" << arguments << ":\n\n";
+        //std::cout << "The rest is:" << arguments << ":\n\n";
     }
 
     return 1;
@@ -93,6 +127,8 @@ int paramCheck(std::string arguments){
 
 
 int main(){
+
+    paramSet();
 
     std::cout << ">";
     std::string input;
