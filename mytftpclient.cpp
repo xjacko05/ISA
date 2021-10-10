@@ -1,13 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <string.h>
 #include <stdbool.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <iostream>
 
 
-bool read;
+bool readON;
 std::string path;
 int timeout;
 int size;
@@ -21,7 +25,7 @@ int port;
 
 void paramSet(){
 
-    read = true;
+    readON = true;
     path = "";
     timeout = -1;
     size = 512;//TODO este zistit
@@ -70,11 +74,11 @@ int paramCheck(std::string arguments){
         arguments = arguments.substr(arguments.find(' ')+1);
         
         if (arg == "-W"){
-            read = false;
+            readON = false;
             value = value.append(" ");
             arguments = value.append(arguments);
         }else if (arg == "-R"){
-            read = true;
+            readON = true;
             value = value.append(" ");
             arguments = value.append(arguments);
         }else if (arg == "-m"){
@@ -124,7 +128,13 @@ int paramCheck(std::string arguments){
     return 1;
 }
 
-
+struct packet
+{
+    short opcode;
+    char* file;
+    char* mode;
+    
+};
 
 int main(){
 
@@ -136,6 +146,60 @@ int main(){
     //std::cout << input;
 
     paramCheck(input);
+    std::cout << "Hello\n";
+
+
+    int sockfd;
+    struct sockaddr_in servaddr; 
+  
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0); 
+    bzero(&servaddr, sizeof(servaddr));
+
+    servaddr.sin_family = AF_INET; 
+    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
+    servaddr.sin_port = htons(69);
+
+    //connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+
+    struct packet tmp;
+    tmp.opcode = 1;
+    tmp.file = "test.txt";
+    tmp.mode = "ascii";
+
+    std::cout << tmp.file << tmp.mode << "\n";
+
+    //char* tr_msg = "01test.txt\0ascii";
+    char *tr_msg = (char*) malloc(2+strlen("test.txt"));
+	memset(tr_msg, 0, sizeof(tr_msg));
+	strcat(tr_msg, "01");//opcode
+	strcat(tr_msg, "test.txt");
+
+    printf("%s\n", tr_msg);
+
+    //send(sockfd, tr_msg, sizeof(tr_msg), 0);
+    sendto(sockfd, (const char *)tr_msg, strlen(tr_msg), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+    sleep(1);
+
+    for (int i = 0; i < 15; i++){
+        //printf( "%c\n", (char) *(&tmp + i));
+    }
+
+    char* tr_reply = (char*) calloc(2000, sizeof(char));
+
+    struct timeval timeout;      
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+    std::cout << "JEDNA\n";
+    //recv(sockfd, tr_reply, 2000 , 0);
+    unsigned int adrlen = sizeof(servaddr);
+    recvfrom(sockfd, tr_reply, 2000 , 0, (struct sockaddr *)&servaddr, &adrlen);
+    printf("%s\n", tr_reply);
+    std::cout << "DVA\n";
+    close(sockfd);
+
+
+
 
     return 0;
 }
