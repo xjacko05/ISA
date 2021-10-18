@@ -174,17 +174,15 @@ int main(){
 	strcat(tr_msg, "01");//opcode
 	strcat(tr_msg, "test.txt");
 
-    printf("%s\n", tr_msg);
+    printf("%c%c\n", tr_msg[0], tr_msg[1]);
 
     //send(sockfd, tr_msg, sizeof(tr_msg), 0);
     sendto(sockfd, (const char *)tr_msg, strlen(tr_msg), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
     sleep(1);
 
-    for (int i = 0; i < 15; i++){
-        //printf( "%c\n", (char) *(&tmp + i));
-    }
+    
 
-    char* tr_reply = (char*) calloc(2000, sizeof(char));
+    char* tr_reply = (char*) malloc(2000*sizeof(char));
 
     struct timeval timeout;      
     timeout.tv_sec = 5;
@@ -193,8 +191,11 @@ int main(){
     std::cout << "JEDNA\n";
     //recv(sockfd, tr_reply, 2000 , 0);
     unsigned int adrlen = sizeof(servaddr);
-    recvfrom(sockfd, tr_reply, 2000 , 0, (struct sockaddr *)&servaddr, &adrlen);
-    printf("%s\n", tr_reply);
+    int rec = recvfrom(sockfd, tr_reply, 2000 , 0, (struct sockaddr *)&servaddr, &adrlen);
+    printf("%i%s\n", rec, tr_reply);
+    for (int i = 0; i < 30; i++){
+        printf( "%i=%i\n", i, *(tr_reply + i));
+    }
     std::cout << "DVA\n";
     close(sockfd);
 
