@@ -18,7 +18,7 @@ int size;
 bool multicast;
 std::string mode;
 bool ipv4;
-std::string adress;
+std::string address;
 int port;
 
 
@@ -32,7 +32,7 @@ void paramSet(){
     multicast = false;
     mode = "binary";
     ipv4 = true;
-    adress = "127.0.0.1";
+    address = "127.0.0.1";
     port = 69;
 }
 
@@ -113,14 +113,14 @@ int paramCheck(std::string arguments){
             }
             //std::cout << "-c value is:" << mode << ":\n";
         }else if (arg == "-a"){
-            adress = value.substr(0, value.find(','));
+            address = value.substr(0, value.find(','));
             try{
                 port = std::stoi(value.substr(value.find(',')+1));
             }catch (...){
                 std::cerr << "PARAM ERR: port number must be integer\n";
                 exit(1);
             }
-            //std::cout << "-a value is:" << adress << "," << port << ":\n";
+            //std::cout << "-a value is:" << address << "," << port << ":\n";
         }
         //std::cout << "The rest is:" << arguments << ":\n\n";
     }
@@ -128,13 +128,17 @@ int paramCheck(std::string arguments){
     return 1;
 }
 
-struct packet
-{
-    short opcode;
-    char* file;
-    char* mode;
+char* readRequest(){
+
+    char *result = (char*) malloc(3+strlen(path.c_str())+strlen(mode.c_str()));
+	memset(result, 0, sizeof(result));
+	strcat(result, "01");
+    strcat(result, path.c_str());
+    strcat(result, "0");
+    strcat(result, mode.c_str());
     
-};
+    return result;
+}
 
 int main(){
 
@@ -143,10 +147,8 @@ int main(){
     std::cout << ">";
     std::string input;
     getline(std::cin, input);
-    //std::cout << input;
 
     paramCheck(input);
-    std::cout << "Hello\n";
 
 
     int sockfd;
@@ -156,28 +158,24 @@ int main(){
     bzero(&servaddr, sizeof(servaddr));
 
     servaddr.sin_family = AF_INET; 
-    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
-    servaddr.sin_port = htons(69);
+    servaddr.sin_addr.s_addr = inet_addr(address.c_str()); 
+    servaddr.sin_port = htons(port);
 
     //connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
-    struct packet tmp;
-    tmp.opcode = 1;
-    tmp.file = "test.txt";
-    tmp.mode = "ascii";
-
-    std::cout << tmp.file << tmp.mode << "\n";
-
     //char* tr_msg = "01test.txt\0ascii";
-    char *tr_msg = (char*) malloc(2+strlen("test.txt"));
+    char *tr_msg = (char*) malloc(2+strlen("test.txt0netascii"));
 	memset(tr_msg, 0, sizeof(tr_msg));
 	strcat(tr_msg, "01");//opcode
-	strcat(tr_msg, "test.txt");
+	strcat(tr_msg, "test.txtknetascii");
+    tr_msg[0] = 0;
+    tr_msg[1] = 1;
+    tr_msg[10] = 0;
 
-    printf("%c%c\n", tr_msg[0], tr_msg[1]);
+    //std::cout << strlen(tr_msg) << "\n";
 
     //send(sockfd, tr_msg, sizeof(tr_msg), 0);
-    sendto(sockfd, (const char *)tr_msg, strlen(tr_msg), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+    sendto(sockfd, (const char *)tr_msg, 20, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
     sleep(1);
 
     
@@ -188,15 +186,15 @@ int main(){
     timeout.tv_sec = 5;
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-    std::cout << "JEDNA\n";
+    std::cout << "Start recieving\n";
     //recv(sockfd, tr_reply, 2000 , 0);
     unsigned int adrlen = sizeof(servaddr);
     int rec = recvfrom(sockfd, tr_reply, 2000 , 0, (struct sockaddr *)&servaddr, &adrlen);
     printf("%i%s\n", rec, tr_reply);
     for (int i = 0; i < 30; i++){
-        printf( "%i=%i\n", i, *(tr_reply + i));
+        printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
     }
-    std::cout << "DVA\n";
+    std::cout << "Stop recieving\n";
     close(sockfd);
 
 
