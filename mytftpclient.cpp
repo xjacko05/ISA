@@ -9,12 +9,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <iostream>
+#include <fstream>
 
 
 bool readON;
 std::string path;
 int timeout;
-int size;
+int blocksize;
 bool multicast;
 std::string mode;
 bool ipv4;
@@ -28,7 +29,7 @@ void paramSet(){
     readON = true;
     path = "";
     timeout = -1;
-    size = 512;//TODO este zistit
+    blocksize = 512;//TODO este zistit
     multicast = false;
     mode = "binary";
     ipv4 = true;
@@ -99,7 +100,7 @@ int paramCheck(std::string arguments){
             //std::cout << "-t value is:" << timeout << ":\n";
         }else if (arg == "-s"){
             try{
-                size = std::stoi(value);
+                blocksize = std::stoi(value);
             }catch (...){
                 std::cerr << "PARAM ERR: size value must be integer\n";
                 exit(1);
@@ -161,28 +162,16 @@ char* readRequest(){
     return result;
 }
 
-int main(){
-
-    paramSet();
-
-    std::cout << ">";
-    std::string input;
-    getline(std::cin, input);
-
-    paramCheck(input);
-
+void processRequest(){
 
     int sockfd;
     struct sockaddr_in servaddr; 
-  
     sockfd = socket(AF_INET, SOCK_DGRAM, 0); 
     bzero(&servaddr, sizeof(servaddr));
-
     servaddr.sin_family = AF_INET; 
     servaddr.sin_addr.s_addr = inet_addr(address.c_str()); 
     servaddr.sin_port = htons(port);
 
-    //connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
     Request tr_msg;
     tr_msg.makeRead();
@@ -191,28 +180,22 @@ int main(){
     for (int i = 0; i < tr_msg.size; i++){
         std::cout << (int) tr_msg.message[i] << "\t" << tr_msg.message[i] << "\n";
     }
-    //exit(1);
 
-
-    //std::cout << strlen(tr_msg) << "\n";
-
-    //send(sockfd, tr_msg, sizeof(tr_msg), 0);
     sendto(sockfd, (const char *) tr_msg.message, tr_msg.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-    sleep(1);
 
-    
-
-    char* tr_reply = (char*) malloc(2000*sizeof(char));
+    char* tr_reply = (char*) malloc((4 + blocksize)*sizeof(char));
 
     struct timeval timeout;
     timeout.tv_sec = 5;
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+
+
     std::cout << "Start recieving\n";
-    //recv(sockfd, tr_reply, 2000 , 0);
+    
     unsigned int adrlen = sizeof(servaddr);
-    int rec = recvfrom(sockfd, tr_reply, 2000 , 0, (struct sockaddr *)&servaddr, &adrlen);
-    printf("%i%s\n", rec, tr_reply);
+    int rec = recvfrom(sockfd, tr_reply, 4+blocksize , 0, (struct sockaddr *)&servaddr, &adrlen);
+    printf("BYTES RECIEVED: %i\n", rec);
     for (int i = 0; i < 30; i++){
         printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
     }
@@ -227,6 +210,24 @@ int main(){
     sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
     
     close(sockfd);
+
+    FILE* cfile = fopen(path.c_str(), "wb");
+    fwrite(&tr_reply[4], 1, rec - 4, cfile);
+    fclose(cfile);
+}
+
+int main(){
+
+    paramSet();
+
+    std::cout << ">";
+    std::string input;
+    getline(std::cin, input);
+
+    paramCheck(input);
+
+    processRequest();
+
 
 
 
