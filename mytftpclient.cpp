@@ -134,19 +134,65 @@ class Request{
         int size;
         char* message;
 
-    void makeRead(){
-        this->size = 4 + strlen(path.c_str()) + strlen(mode.c_str());
-        this->message = (char*) malloc(this->size * sizeof(char));
-	    memset(this->message, 0, size);
-	    strcat(this->message, "00");
-        strcat(this->message, path.c_str());
-        strcat(this->message, "0");
-        strcat(this->message, mode.c_str());
-        message[0] = 0;
-        message[1] = 1;
-        message[2 + strlen(path.c_str())] = 0;
+        Request(){
+            this->size = 2 + strlen(path.c_str()) + 1 + strlen(mode.c_str()) + 1 + strlen("blksize") + 1 + 3 + 1;
+            if (timeout != -1){
+                this->size += strlen("timeout") + 1 + 2 + 1;
+            }
+            this->message = (char*) malloc(this->size);
+            memset(this->message, 0, this->size);
 
-    }
+            if (readON){
+                this->message[1] = 1;
+            }else if (!readON){
+                this->message[1] = 2;
+            }
+
+            int ptr = 2;
+
+            std::cout << this->size << "\n";
+
+
+            memcpy(&message[ptr++], path.c_str(), strlen(path.c_str()));
+            ptr += strlen(path.c_str());
+            memcpy(&message[ptr++], mode.c_str(), strlen(mode.c_str()));
+            ptr += strlen(mode.c_str());
+            memcpy(&message[ptr++], "blksize", strlen("blksize"));
+            ptr += strlen("blksize");
+            message[ptr++] = '2';
+            message[ptr++] = '5';
+            message[ptr++] = '6';
+            ptr++;
+
+            if (timeout != -1){
+                memcpy(&message[ptr++], "timeout", strlen("timeout"));
+                ptr += strlen("timeout");
+                message[ptr++] = timeout >> 8;
+                message[ptr++] = timeout;
+                ptr++;
+            }
+
+            int i = 0;
+            while(i<this->size){
+                printf("%i\t%i\t%c\n", i, message[i], message[i]);
+                i++;
+            }
+            
+
+
+            /*
+            this->size = 4 + strlen(path.c_str()) + strlen(mode.c_str());
+            this->message = (char*) malloc(this->size * sizeof(char));
+	        memset(this->message, 0, size);
+	        strcat(this->message, "00");
+            strcat(this->message, path.c_str());
+            strcat(this->message, "0");
+            strcat(this->message, mode.c_str());
+            message[0] = 0;
+            message[1] = 1;
+            message[2 + strlen(path.c_str())] = 0;
+            */
+        }
 };
 
 char* readRequest(){
@@ -158,6 +204,7 @@ char* readRequest(){
     strcat(result, path.c_str());
     strcat(result, "0");
     strcat(result, mode.c_str());
+    strcat(result, "0");
     
     return result;
 }
@@ -174,7 +221,6 @@ void processRequest(){
 
 
     Request tr_msg;
-    tr_msg.makeRead();
     std::cout << tr_msg.size << "\n";
 
     for (int i = 0; i < tr_msg.size; i++){
@@ -210,7 +256,7 @@ void processRequest(){
     do{
         rec = recvfrom(sockfd, tr_reply, 4+blocksize , 0, (struct sockaddr *)&servaddr, &adrlen);
         fwrite(&tr_reply[4], 1, rec - 4, cfile);
-
+        ack[2] = i >> 8;
         ack[3] = i++;
         sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
