@@ -128,11 +128,32 @@ int paramCheck(std::string arguments){
     return 1;
 }
 
+class Request{
+    public:
+        int size;
+        char* message;
+
+    void makeRead(){
+        this->size = 4 + strlen(path.c_str()) + strlen(mode.c_str());
+        this->message = (char*) malloc(this->size * sizeof(char));
+	    memset(this->message, 0, size);
+	    strcat(this->message, "00");
+        strcat(this->message, path.c_str());
+        strcat(this->message, "0");
+        strcat(this->message, mode.c_str());
+        message[0] = 0;
+        message[1] = 1;
+        message[2 + strlen(path.c_str())] = 0;
+
+    }
+};
+
 char* readRequest(){
 
-    char *result = (char*) malloc(3+strlen(path.c_str())+strlen(mode.c_str()));
-	memset(result, 0, sizeof(result));
-	strcat(result, "01");
+    int size = 4 + strlen(path.c_str()) + strlen(mode.c_str());
+    char *result = (char*) malloc(size * sizeof(char));
+	memset(result, 0, size);
+	strcat(result, "00");
     strcat(result, path.c_str());
     strcat(result, "0");
     strcat(result, mode.c_str());
@@ -163,26 +184,27 @@ int main(){
 
     //connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
-    //char* tr_msg = "01test.txt\0ascii";
-    char *tr_msg = (char*) malloc(2+strlen("test.txt0netascii"));
-	memset(tr_msg, 0, sizeof(tr_msg));
-	strcat(tr_msg, "01");//opcode
-	strcat(tr_msg, "test.txtknetascii");
-    tr_msg[0] = 0;
-    tr_msg[1] = 1;
-    tr_msg[10] = 0;
+    Request tr_msg;
+    tr_msg.makeRead();
+    std::cout << tr_msg.size << "\n";
+
+    for (int i = 0; i < tr_msg.size; i++){
+        std::cout << (int) tr_msg.message[i] << "\t" << tr_msg.message[i] << "\n";
+    }
+    //exit(1);
+
 
     //std::cout << strlen(tr_msg) << "\n";
 
     //send(sockfd, tr_msg, sizeof(tr_msg), 0);
-    sendto(sockfd, (const char *)tr_msg, 20, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+    sendto(sockfd, (const char *) tr_msg.message, tr_msg.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
     sleep(1);
 
     
 
     char* tr_reply = (char*) malloc(2000*sizeof(char));
 
-    struct timeval timeout;      
+    struct timeval timeout;
     timeout.tv_sec = 5;
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
@@ -195,6 +217,15 @@ int main(){
         printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
     }
     std::cout << "Stop recieving\n";
+
+    //ack
+    char* ack = (char*) malloc(4 * sizeof (char));
+    ack[0] = 0;
+    ack[1] = 4;
+    ack[2] = 0;
+    ack[3] = 1;
+    sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+    
     close(sockfd);
 
 
