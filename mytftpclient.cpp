@@ -190,29 +190,43 @@ void processRequest(){
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
 
-
-    std::cout << "Start recieving\n";
-    
-    unsigned int adrlen = sizeof(servaddr);
-    int rec = recvfrom(sockfd, tr_reply, 4+blocksize , 0, (struct sockaddr *)&servaddr, &adrlen);
-    printf("BYTES RECIEVED: %i\n", rec);
-    for (int i = 0; i < 30; i++){
-        printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
-    }
-    std::cout << "Stop recieving\n";
-
     //ack
     char* ack = (char*) malloc(4 * sizeof (char));
     ack[0] = 0;
     ack[1] = 4;
     ack[2] = 0;
     ack[3] = 1;
-    sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+
+    //printf("%i\t%i\t%i\t%i\n", ack[0], ack[1], ack[2], ack[3]);
+
+
+    //std::cout << "Start recieving\n";
+    
+    unsigned int adrlen = sizeof(servaddr);
+    int rec = 0;
+    int i = 1;
+    FILE* cfile = fopen(path.c_str(), "wb");
+
+    do{
+        rec = recvfrom(sockfd, tr_reply, 4+blocksize , 0, (struct sockaddr *)&servaddr, &adrlen);
+        fwrite(&tr_reply[4], 1, rec - 4, cfile);
+
+        ack[3] = i++;
+        sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+
+    }while (rec == blocksize + 4);
+    
+    //printf("BYTES RECIEVED: %i\n", rec);
+    //for (int i = 0; i < 30; i++){
+    //    printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
+    //}
+    //std::cout << "Stop recieving\n";
+
+    
+    
     
     close(sockfd);
 
-    FILE* cfile = fopen(path.c_str(), "wb");
-    fwrite(&tr_reply[4], 1, rec - 4, cfile);
     fclose(cfile);
 }
 
