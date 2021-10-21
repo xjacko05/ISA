@@ -151,7 +151,6 @@ class Request{
                 t_size = "0";
             }else if (!readON){
                 t_size = std::to_string(std::filesystem::file_size(path));
-                std::cout << "TSIZE JE:\t" << t_size << "\n";
             }
             this->size += strlen("tsize") + 1 + strlen(t_size.c_str()) + 1;
 
@@ -196,20 +195,6 @@ class Request{
                 printf("%i\t%i\t%c\n", i, message[i], message[i]);
                 i++;
             }
-            */
-
-
-            /*
-            this->size = 4 + strlen(path.c_str()) + strlen(mode.c_str());
-            this->message = (char*) malloc(this->size * sizeof(char));
-	        memset(this->message, 0, size);
-	        strcat(this->message, "00");
-            strcat(this->message, path.c_str());
-            strcat(this->message, "0");
-            strcat(this->message, mode.c_str());
-            message[0] = 0;
-            message[1] = 1;
-            message[2 + strlen(path.c_str())] = 0;
             */
         }
 };
@@ -262,7 +247,31 @@ void processRequest(){
     rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
 
     if (tr_reply[1] == 6){
-        
+
+        //int ptr = 2;
+        for (int ptr = 2; ptr != rec;){
+            if (!strcmp((char*)&tr_reply[ptr], "blksize")){
+                std::cout << (char*)&tr_reply[ptr] << "\t\t";
+                ptr += strlen("blksize") + 1;
+                std::cout << (char*)&tr_reply[ptr] << std::endl;
+                ptr += strlen((char*)&tr_reply[ptr]) + 1;
+
+            }
+            if (!strcmp((char*)&tr_reply[ptr], "timeout")){
+                std::cout << (char*)&tr_reply[ptr] << "\t\t";
+                ptr += strlen("timeout") + 1;
+                std::cout << (char*)&tr_reply[ptr] << std::endl;
+                ptr += strlen((char*)&tr_reply[ptr]) + 1;
+
+            }
+            if (!strcmp((char*)&tr_reply[ptr], "tsize")){
+                std::cout << (char*)&tr_reply[ptr] << "\t\t";
+                ptr += strlen("tsize") + 1;
+                std::cout << (char*)&tr_reply[ptr] << std::endl;
+                ptr += strlen((char*)&tr_reply[ptr]) + 1;
+
+            }
+        }
     }
 
 
@@ -272,8 +281,9 @@ void processRequest(){
     ack[0] = 0;
     ack[1] = 4;
     ack[2] = 0;
-    ack[3] = 1;
+    ack[3] = 0;
 
+    sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
     //std::cout << "Start recieving\n";
     
