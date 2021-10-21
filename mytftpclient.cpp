@@ -10,10 +10,10 @@
 #include <unistd.h>
 #include <iostream>
 #include <fstream>
-
+#include <filesystem>
 
 bool readON;
-std::string path;
+std::filesystem::path path;
 int timeout_i;
 std::string timeout_s;
 int blocksize_i;
@@ -145,6 +145,16 @@ class Request{
             if (timeout_i != -1){
                 this->size += strlen("timeout") + 1 + strlen(timeout_s.c_str()) + 1;
             }
+
+            std::string t_size;
+            if (readON){
+                t_size = "0";
+            }else if (!readON){
+                t_size = std::to_string(std::filesystem::file_size(path));
+                std::cout << "TSIZE JE:\t" << t_size << "\n";
+            }
+            this->size += strlen("tsize") + 1 + strlen(t_size.c_str()) + 1;
+
             this->message = (char*) malloc(this->size);
             memset(this->message, 0, this->size);
 
@@ -174,6 +184,12 @@ class Request{
                 memcpy(&message[ptr++], timeout_s.c_str(), strlen(timeout_s.c_str()));
                 ptr += strlen(timeout_s.c_str());
             }
+
+            memcpy(&message[ptr++], "tsize", strlen("tsize"));
+            ptr += strlen("tsize");
+            memcpy(&message[ptr++], t_size.c_str(), strlen(t_size.c_str()));
+            ptr += strlen(t_size.c_str());
+
             /*
             int i = 0;
             while(i<this->size){
@@ -234,11 +250,22 @@ void processRequest(){
     sendto(sockfd, (const char *) tr_msg.message, tr_msg.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
     char* tr_reply = (char*) malloc((4 + blocksize_i)*sizeof(char));
+    memset(tr_reply, 0, blocksize_i + 4);
 
     struct timeval timeout;
     timeout.tv_sec = 5;
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+    unsigned int adrlen = sizeof(servaddr);
+    int rec = 0;
+
+    rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
+
+    if (tr_reply[1] == 6){
+        
+    }
+
+
 
     //ack
     char* ack = (char*) malloc(4 * sizeof (char));
@@ -247,29 +274,26 @@ void processRequest(){
     ack[2] = 0;
     ack[3] = 1;
 
-    //printf("%i\t%i\t%i\t%i\n", ack[0], ack[1], ack[2], ack[3]);
-
 
     //std::cout << "Start recieving\n";
     
-    unsigned int adrlen = sizeof(servaddr);
-    int rec = 0;
     int i = 1;
-    FILE* cfile = fopen(path.c_str(), "wb");
+    FILE* cfile = fopen(path.filename().c_str(), "wb");
 
     do{
         rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
         fwrite(&tr_reply[4], 1, rec - 4, cfile);
+        memset(tr_reply, 0, blocksize_i + 4);
         ack[2] = i >> 8;
         ack[3] = i++;
         sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
     }while (rec == blocksize_i + 4);
     
-    //printf("BYTES RECIEVED: %i\n", rec);
-    //for (int i = 0; i < 30; i++){
-    //    printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
-    //}
+    printf("BYTES RECIEVED: %i\n", rec);
+    for (int i = 0; i < 30; i++){
+        printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
+    }
     //std::cout << "Stop recieving\n";
 
     
