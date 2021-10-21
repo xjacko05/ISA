@@ -14,8 +14,10 @@
 
 bool readON;
 std::string path;
-int timeout;
-int blocksize;
+int timeout_i;
+std::string timeout_s;
+int blocksize_i;
+std::string blocksize_s;
 bool multicast;
 std::string mode;
 bool ipv4;
@@ -28,8 +30,10 @@ void paramSet(){
 
     readON = true;
     path = "";
-    timeout = -1;
-    blocksize = 512;//TODO este zistit
+    timeout_i = -1;
+    timeout_s = "";
+    blocksize_i = 512;//TODO este zistit
+    blocksize_s = "512";
     multicast = false;
     mode = "binary";
     ipv4 = true;
@@ -92,7 +96,8 @@ int paramCheck(std::string arguments){
             //std::cout << "-d value is:" << path << ":\n";
         }else if (arg == "-t"){
             try{
-                timeout = std::stoi(value);
+                timeout_i = std::stoi(value);
+                timeout_s = std::to_string(timeout_i);
             }catch (...){
                 std::cerr << "PARAM ERR: timeout value must be integer\n";
                 exit(1);
@@ -100,7 +105,8 @@ int paramCheck(std::string arguments){
             //std::cout << "-t value is:" << timeout << ":\n";
         }else if (arg == "-s"){
             try{
-                blocksize = std::stoi(value);
+                blocksize_i = std::stoi(value);
+                blocksize_s = std::to_string(blocksize_i);
             }catch (...){
                 std::cerr << "PARAM ERR: size value must be integer\n";
                 exit(1);
@@ -135,9 +141,9 @@ class Request{
         char* message;
 
         Request(){
-            this->size = 2 + strlen(path.c_str()) + 1 + strlen(mode.c_str()) + 1 + strlen("blksize") + 1 + 3 + 1;
-            if (timeout != -1){
-                this->size += strlen("timeout") + 1 + 2 + 1;
+            this->size = 2 + strlen(path.c_str()) + 1 + strlen(mode.c_str()) + 1 + strlen("blksize") + 1 + strlen(blocksize_s.c_str()) + 1;
+            if (timeout_i != -1){
+                this->size += strlen("timeout") + 1 + strlen(timeout_s.c_str()) + 1;
             }
             this->message = (char*) malloc(this->size);
             memset(this->message, 0, this->size);
@@ -159,25 +165,22 @@ class Request{
             ptr += strlen(mode.c_str());
             memcpy(&message[ptr++], "blksize", strlen("blksize"));
             ptr += strlen("blksize");
-            message[ptr++] = '2';
-            message[ptr++] = '5';
-            message[ptr++] = '6';
-            ptr++;
+            memcpy(&message[ptr++], blocksize_s.c_str(), strlen(blocksize_s.c_str()));
+            ptr += strlen(blocksize_s.c_str());
 
-            if (timeout != -1){
+            if (timeout_i != -1){
                 memcpy(&message[ptr++], "timeout", strlen("timeout"));
                 ptr += strlen("timeout");
-                message[ptr++] = timeout >> 8;
-                message[ptr++] = timeout;
-                ptr++;
+                memcpy(&message[ptr++], timeout_s.c_str(), strlen(timeout_s.c_str()));
+                ptr += strlen(timeout_s.c_str());
             }
-
+            /*
             int i = 0;
             while(i<this->size){
                 printf("%i\t%i\t%c\n", i, message[i], message[i]);
                 i++;
             }
-            
+            */
 
 
             /*
@@ -227,9 +230,10 @@ void processRequest(){
         std::cout << (int) tr_msg.message[i] << "\t" << tr_msg.message[i] << "\n";
     }
 
+    //sending request
     sendto(sockfd, (const char *) tr_msg.message, tr_msg.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
-    char* tr_reply = (char*) malloc((4 + blocksize)*sizeof(char));
+    char* tr_reply = (char*) malloc((4 + blocksize_i)*sizeof(char));
 
     struct timeval timeout;
     timeout.tv_sec = 5;
@@ -254,13 +258,13 @@ void processRequest(){
     FILE* cfile = fopen(path.c_str(), "wb");
 
     do{
-        rec = recvfrom(sockfd, tr_reply, 4+blocksize , 0, (struct sockaddr *)&servaddr, &adrlen);
+        rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
         fwrite(&tr_reply[4], 1, rec - 4, cfile);
         ack[2] = i >> 8;
         ack[3] = i++;
         sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
-    }while (rec == blocksize + 4);
+    }while (rec == blocksize_i + 4);
     
     //printf("BYTES RECIEVED: %i\n", rec);
     //for (int i = 0; i < 30; i++){
