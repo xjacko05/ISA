@@ -199,21 +199,48 @@ class Request{
         }
 };
 
-char* readRequest(){
+class OACK{
+    public:
+        std::string blksize;
+        std::string timeout;
+        std::string tsize;
 
-    int size = 4 + strlen(path.c_str()) + strlen(mode.c_str());
-    char *result = (char*) malloc(size * sizeof(char));
-	memset(result, 0, size);
-	strcat(result, "00");
-    strcat(result, path.c_str());
-    strcat(result, "0");
-    strcat(result, mode.c_str());
-    strcat(result, "0");
-    
-    return result;
-}
+        OACK(char* message, int rec){
 
-void processRequest(){
+            blksize = "";
+            timeout = "";
+            tsize = "";
+
+            for (int ptr = 2; ptr != rec;){
+            if (!strcmp((char*)&message[ptr], "blksize")){
+                //std::cout << (char*)&message[ptr] << "\t\t";
+                ptr += strlen("blksize") + 1;
+                blksize = (char*)&message[ptr];
+                //std::cout << (char*)&message[ptr] << std::endl;
+                ptr += strlen((char*)&message[ptr]) + 1;
+
+            }
+            if (!strcmp((char*)&message[ptr], "timeout")){
+                //std::cout << (char*)&message[ptr] << "\t\t";
+                ptr += strlen("timeout") + 1;
+                timeout = (char*)&message[ptr];
+                //std::cout << (char*)&message[ptr] << std::endl;
+                ptr += strlen((char*)&message[ptr]) + 1;
+
+            }
+            if (!strcmp((char*)&message[ptr], "tsize")){
+                //std::cout << (char*)&message[ptr] << "\t\t";
+                ptr += strlen("tsize") + 1;
+                tsize = (char*)&message[ptr];
+                //std::cout << (char*)&message[ptr] << std::endl;
+                ptr += strlen((char*)&message[ptr]) + 1;
+
+            }
+        }
+        } 
+};
+
+void readRequest(){
 
     int sockfd;
     struct sockaddr_in servaddr; 
@@ -224,18 +251,15 @@ void processRequest(){
     servaddr.sin_port = htons(port);
 
 
-    Request tr_msg;
-    std::cout << tr_msg.size << "\n";
+    Request req;
+    std::cout << req.size << "\n";
 
-    for (int i = 0; i < tr_msg.size; i++){
-        std::cout << (int) tr_msg.message[i] << "\t" << tr_msg.message[i] << "\n";
+    for (int i = 0; i < req.size; i++){
+        std::cout << (int) req.message[i] << "\t" << req.message[i] << "\n";
     }
 
     //sending request
-    sendto(sockfd, (const char *) tr_msg.message, tr_msg.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-
-    char* tr_reply = (char*) malloc((4 + blocksize_i)*sizeof(char));
-    memset(tr_reply, 0, blocksize_i + 4);
+    sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
     struct timeval timeout;
     timeout.tv_sec = 5;
@@ -244,62 +268,58 @@ void processRequest(){
     unsigned int adrlen = sizeof(servaddr);
     int rec = 0;
 
-    rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
+    //OACK
+    char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
+    memset(oackBuff, 0, 516);
+    rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddr, &adrlen);
 
-    if (tr_reply[1] == 6){
+    
 
-        //int ptr = 2;
-        for (int ptr = 2; ptr != rec;){
-            if (!strcmp((char*)&tr_reply[ptr], "blksize")){
-                std::cout << (char*)&tr_reply[ptr] << "\t\t";
-                ptr += strlen("blksize") + 1;
-                std::cout << (char*)&tr_reply[ptr] << std::endl;
-                ptr += strlen((char*)&tr_reply[ptr]) + 1;
+    if (oackBuff[1] == 6){
 
-            }
-            if (!strcmp((char*)&tr_reply[ptr], "timeout")){
-                std::cout << (char*)&tr_reply[ptr] << "\t\t";
-                ptr += strlen("timeout") + 1;
-                std::cout << (char*)&tr_reply[ptr] << std::endl;
-                ptr += strlen((char*)&tr_reply[ptr]) + 1;
-
-            }
-            if (!strcmp((char*)&tr_reply[ptr], "tsize")){
-                std::cout << (char*)&tr_reply[ptr] << "\t\t";
-                ptr += strlen("tsize") + 1;
-                std::cout << (char*)&tr_reply[ptr] << std::endl;
-                ptr += strlen((char*)&tr_reply[ptr]) + 1;
-
-            }
-        }
+        OACK oackVals(oackBuff, rec);
+        //TODO vyriesit edge cases upravit bloxksize, timout, skontrolovat free space alebo ukoncit program
+        blocksize_s = oackVals.blksize;
+        blocksize_i = std::stoi(blocksize_s);
+    }else if (oackBuff[1] == 8){
+        //TODO options refused by server
+    }else if (oackBuff[1] == 3){
+        //TODO normalny err
     }
 
+    int ackNum = 0;
+    FILE* cfile = fopen(path.filename().c_str(), "wb");
 
+    char* tr_reply = (char*) malloc((4 + blocksize_i)*sizeof(char));
+    memset(tr_reply, 0, blocksize_i + 4);
 
     //ack
     char* ack = (char*) malloc(4 * sizeof (char));
     ack[0] = 0;
     ack[1] = 4;
     ack[2] = 0;
-    ack[3] = 0;
+    ack[3] = ackNum;
+
+    if (oackBuff[1] == 3){
+        fwrite(&oackBuff[4], 1, rec - 4, cfile);
+        ack[3] = ++ackNum;
+        std::cout << "ZAPISUJEM\n";
+    }
 
     sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
-    //std::cout << "Start recieving\n";
-    
-    int i = 1;
-    FILE* cfile = fopen(path.filename().c_str(), "wb");
+    if (oackBuff[1] == 6 || rec == blocksize_i + 4){
+        do{
+            rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
+            fwrite(&tr_reply[4], 1, rec - 4, cfile);
+            memset(tr_reply, 0, blocksize_i + 4);
+            ack[2] = ++ackNum >> 8;
+            ack[3] = ackNum;
+            sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 
-    do{
-        rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
-        fwrite(&tr_reply[4], 1, rec - 4, cfile);
-        memset(tr_reply, 0, blocksize_i + 4);
-        ack[2] = i >> 8;
-        ack[3] = i++;
-        sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+        }while (rec == blocksize_i + 4);
+    }
 
-    }while (rec == blocksize_i + 4);
-    
     printf("BYTES RECIEVED: %i\n", rec);
     for (int i = 0; i < 30; i++){
         printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
@@ -324,7 +344,7 @@ int main(){
 
     paramCheck(input);
 
-    processRequest();
+    readRequest();
 
 
 
