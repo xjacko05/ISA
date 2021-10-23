@@ -93,7 +93,7 @@ int paramCheck(std::string arguments){
             //std::cout << "-m value is:" << multicast << ":\n";
         }else if (arg == "-d"){
             path = value;
-            //std::cout << "-d value is:" << path << ":\n";
+            std::cout << "-d value is:" << path << ":\n";
         }else if (arg == "-t"){
             try{
                 timeout_i = std::stoi(value);
@@ -130,6 +130,11 @@ int paramCheck(std::string arguments){
             //std::cout << "-a value is:" << address << "," << port << ":\n";
         }
         //std::cout << "The rest is:" << arguments << ":\n\n";
+    }
+
+    if (!readON && !std::filesystem::exists(path)){
+        std::cerr << "PARAM ERR: " << path << "does not exist\n";
+        exit(1);
     }
 
     return 1;
@@ -237,13 +242,13 @@ class OACK{
 
             }
         }
-        } 
+    }
 };
 
 void readRequest(){
 
     int sockfd;
-    struct sockaddr_in servaddr; 
+    struct sockaddr_in servaddr;
     sockfd = socket(AF_INET, SOCK_DGRAM, 0); 
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET; 
@@ -283,7 +288,7 @@ void readRequest(){
         blocksize_i = std::stoi(blocksize_s);
     }else if (oackBuff[1] == 8){
         //TODO options refused by server
-    }else if (oackBuff[1] == 3){
+    }else if (oackBuff[1] == 5){
         //TODO normalny err
     }
 
@@ -303,7 +308,6 @@ void readRequest(){
     if (oackBuff[1] == 3){
         fwrite(&oackBuff[4], 1, rec - 4, cfile);
         ack[3] = ++ackNum;
-        std::cout << "ZAPISUJEM\n";
     }
 
     sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
@@ -324,10 +328,96 @@ void readRequest(){
     for (int i = 0; i < 30; i++){
         printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
     }
-    //std::cout << "Stop recieving\n";
+    
+    close(sockfd);
 
-    
-    
+    fclose(cfile);
+}
+
+void writeRequest(){
+
+    int sockfd;
+    struct sockaddr_in servaddr; 
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0); 
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET; 
+    servaddr.sin_addr.s_addr = inet_addr(address.c_str()); 
+    servaddr.sin_port = htons(port);
+
+
+    Request req;
+    std::cout << req.size << "\n";
+
+    for (int i = 0; i < req.size; i++){
+        std::cout << (int) req.message[i] << "\t" << req.message[i] << "\n";
+    }
+
+    //sending request
+    sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+
+    struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+    unsigned int adrlen = sizeof(servaddr);
+    int rec = 0;
+
+    //OACK
+    char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
+    memset(oackBuff, 0, 516);
+    rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddr, &adrlen);
+
+    if (oackBuff[1] == 6){
+
+        OACK oackVals(oackBuff, rec);
+        //TODO vyriesit edge cases upravit bloxksize, timout, skontrolovat free space alebo ukoncit program
+        blocksize_s = oackVals.blksize;
+        blocksize_i = std::stoi(blocksize_s);
+    }else if (oackBuff[1] == 8){
+        //TODO options refused by server
+    }else if (oackBuff[1] == 5){
+        //TODO normalny err
+    }else if (oackBuff[1] == 3){
+        
+    }
+
+    int ackNum = 0;
+    int blockNum = 0;
+    int num = 0;
+    FILE* cfile = fopen(path.filename().c_str(), "r");
+
+    char* dataBlock = (char*) malloc((4 + blocksize_i)*sizeof(char));
+    memset(dataBlock, 0, blocksize_i + 4);
+    dataBlock[1] = 3;
+
+    //ack
+    char* ack = (char*) malloc(4 * sizeof (char));
+    memset(ack, 0, 4);
+
+    do{
+        dataBlock[2] = ++blockNum >> 8;
+        dataBlock[3] = blockNum;
+        num = fread(&dataBlock[4], 1, blocksize_i, cfile);
+        sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+        rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddr, &adrlen);
+        //restransmission in case of none/incorrect ack
+        /*
+        if (rec == -1 || (unsigned short) ack[2] != blockNum){
+            sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+            rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddr, &adrlen);
+            if (rec == -1 || (unsigned short) ack[2] != blockNum){
+                std::cerr << "Retransmission failed\n";
+                exit(1);
+            }
+        }*/
+        memset(&dataBlock[4], 0, blocksize_i);
+        
+    }while (num == blocksize_i);
+
+    printf("BYTES RECIEVED: %i\n", rec);
+    for (int i = 0; i < 30; i++){
+        printf( "%i=\t%c\t%i\n", i, *(dataBlock + i), *(dataBlock + i));
+    }
     
     close(sockfd);
 
@@ -344,7 +434,11 @@ int main(){
 
     paramCheck(input);
 
-    readRequest();
+    if (readON){
+        readRequest();
+    } else if (!readON){
+        writeRequest();
+    }
 
 
 
