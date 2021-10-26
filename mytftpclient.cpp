@@ -11,6 +11,9 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
+#include <regex>
+#include <sys/ioctl.h>
+#include <net/if.h>
 
 bool readON;
 std::filesystem::path path;
@@ -32,11 +35,11 @@ void paramSet(){
     path = "";
     timeout_i = -1;
     timeout_s = "";
-    blocksize_i = 512;//TODO este zistit
-    blocksize_s = "512";
+    blocksize_i = -1;//TODO este zistit
+    blocksize_s = "-1";
     multicast = false;
     mode = "binary";
-    ipv4 = false;
+    ipv4 = true;
     address = "127.0.0.1";
     port = 69;
 }
@@ -121,6 +124,18 @@ int paramCheck(std::string arguments){
             //std::cout << "-c value is:" << mode << ":\n";
         }else if (arg == "-a"){
             address = value.substr(0, value.find(','));
+            //https://www.tutorialspoint.com/validate-ipv4-address-using-regex-patterns-in-cplusplus
+            std::regex ipv4Re("^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$");
+            //https://stackoverflow.com/questions/53497/regular-expression-that-matches-valid-ipv6-addresses
+            std::regex ipv6Re("([a-fA-F0-9:]+:+)+[a-fA-F0-9]+$");
+            if (std::regex_match(address, ipv4Re)){
+                ipv4 = true;
+            }else if (std::regex_match(address, ipv6Re)){
+                ipv4 = false;
+            }else{
+                std::cerr << "PARAM ERR: invalid address\n";
+                exit(1);
+            }
             try{
                 port = std::stoi(value.substr(value.find(',')+1));
             }catch (...){
@@ -378,13 +393,29 @@ void readRequest(){
 void writeRequest(){
 
     int sockfd;
-    struct sockaddr_in servaddr; 
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0); 
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET; 
-    servaddr.sin_addr.s_addr = inet_addr(address.c_str()); 
-    servaddr.sin_port = htons(port);
+    struct sockaddr_in servaddrivp4;
+    struct sockaddr_in6 servaddrivp6;
+    //bzero(&servaddr, sizeof(servaddr));
 
+    if (ipv4){
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        servaddrivp4.sin_family = AF_INET;
+        servaddrivp4.sin_addr.s_addr = inet_addr(address.c_str()); 
+        servaddrivp4.sin_port = htons(port);
+    }else{
+        sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
+        servaddrivp6.sin6_family = AF_INET6;
+        //servaddrivp6.sin6_addr.s6_addr = inet_addr(address.c_str()); 
+        inet_pton(AF_INET6, address.c_str(), &servaddrivp6.sin6_addr);
+        servaddrivp6.sin6_port  = htons(port);
+    }
+
+
+    struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
 
     Request req;
     std::cout << req.size << "\n";
@@ -394,30 +425,73 @@ void writeRequest(){
     }
 
     //sending request
-    sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-
-    struct timeval timeout;
-    timeout.tv_sec = 5;
-    timeout.tv_usec = 0;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-    unsigned int adrlen = sizeof(servaddr);
-    int rec = 0;
+    if (ipv4){
+        sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
+    }else{
+        sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
+    }
+/*
+    struct ifreq ifr;
+    int rr;
+    //rr = ioctl(sockfd, SIOCGIFMTU, (caddr_t)&ifr);
+    std::cout << "MAX MTU is\t" << rr << "\t" << ifr.ifr_ifrn.ifrn_name << "\n";
+*/
 
     //OACK
     char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
     memset(oackBuff, 0, 516);
-    rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddr, &adrlen);
+
+    unsigned int adrlen = 0;
+    int rec = 0;
+
+    if (ipv4){
+        adrlen = sizeof(servaddrivp4);
+        rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddrivp4, &adrlen);
+    }else{
+        adrlen = sizeof(servaddrivp6);
+        rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddrivp6, &adrlen);
+    }
+
+    
 
     if (oackBuff[1] == 6){
 
         OACK oackVals(oackBuff, rec);
         //TODO vyriesit edge cases upravit bloxksize, timout, skontrolovat free space alebo ukoncit program
-        blocksize_s = oackVals.blksize;
-        blocksize_i = std::stoi(blocksize_s);
+        if (timeout_i != -1){
+            if (oackVals.timeout == ""){
+                std::cout << "NOTICE: server refused timeout value, using default value\n";
+            }else if (oackVals.timeout == timeout_s){
+                timeout.tv_sec = std::stoi(oackVals.timeout);
+                setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+                setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+            }else{
+                std::cerr << "SERVER MALFUNCTION proposed different timeout\n";
+                exit(1);
+            }
+        }
+        if (blocksize_i != -1){
+            if (oackVals.blksize == ""){
+                std::cout << "NOTICE: server refused blksize value, using default value\n";
+                blocksize_s = "512";
+                blocksize_i = 512;
+            }else if (oackVals.blksize == blocksize_s){
+                blocksize_s = oackVals.blksize;
+                blocksize_i = std::stoi(blocksize_s);
+            }
+        }else{
+            blocksize_i = 512;
+            blocksize_s = "512";
+        }
+        if (oackVals.tsize != std::to_string(std::filesystem::file_size(path))){
+            std::cerr << "SERVER MALFUNCTION: -W did not echo tsize\n";
+            exit(1);
+        }
     }else if (oackBuff[1] == 8){
-        //TODO options refused by server
+        //TODO options refused by server, asi skusit bez options
     }else if (oackBuff[1] == 5){
-        //TODO normalny err
+        std::cerr << &oackBuff[4] << "\n";
+        exit(1);
     }else if (oackBuff[1] == 3){
         
     }
@@ -439,8 +513,13 @@ void writeRequest(){
         dataBlock[2] = ++blockNum >> 8;
         dataBlock[3] = blockNum;
         num = fread(&dataBlock[4], 1, blocksize_i, cfile);
-        sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-        rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddr, &adrlen);
+        if (ipv4){
+            sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
+            rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp4, &adrlen);
+        }else{
+            sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
+            rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp6, &adrlen);
+        }
         //restransmission in case of none/incorrect ack
         /*
         if (rec == -1 || (unsigned short) ack[2] != blockNum){
