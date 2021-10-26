@@ -36,7 +36,7 @@ void paramSet(){
     blocksize_s = "512";
     multicast = false;
     mode = "binary";
-    ipv4 = true;
+    ipv4 = false;
     address = "127.0.0.1";
     port = 69;
 }
@@ -245,38 +245,25 @@ class OACK{
     }
 };
 
-class Socket{
-    public:
-        int sockfd;
-        struct sockaddr_in servaddrivp4;
-        struct sockaddr_in6 servaddrivp6;
-
-
-        Socket(){
-            if (ipv4){
-                servaddrivp4.sin_family = AF_INET;
-                servaddrivp4.sin_addr.s_addr = inet_addr(address.c_str()); 
-                servaddrivp4.sin_port = htons(port);
-            }else{
-                servaddrivp6.sin6_family = AF_INET6;
-                //servaddrivp6.sin6_addr.s6_addr = inet_addr(address.c_str()); 
-                inet_pton(AF_INET6, address.c_str(), &servaddrivp6.sin6_addr);
-                servaddrivp6.sin6_port  = htons(port);
-            }
-        }
-};
 
 void readRequest(){
 
     int sockfd;
-    //struct sockaddr_in servaddr;
+    struct sockaddr_in servaddrivp4;
+    struct sockaddr_in6 servaddrivp6;
     //bzero(&servaddr, sizeof(servaddr));
-    Socket servaddr;
 
     if (ipv4){
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        servaddrivp4.sin_family = AF_INET;
+        servaddrivp4.sin_addr.s_addr = inet_addr(address.c_str()); 
+        servaddrivp4.sin_port = htons(port);
     }else{
         sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
+        servaddrivp6.sin6_family = AF_INET6;
+        //servaddrivp6.sin6_addr.s6_addr = inet_addr(address.c_str()); 
+        inet_pton(AF_INET6, address.c_str(), &servaddrivp6.sin6_addr);
+        servaddrivp6.sin6_port  = htons(port);
     }
     
 
@@ -291,19 +278,33 @@ void readRequest(){
     }
 
     //sending request
-    sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+    if (ipv4){
+        sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
+    }else{
+        sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
+    }
 
     struct timeval timeout;
     timeout.tv_sec = 5;
     timeout.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-    unsigned int adrlen = sizeof(servaddr);
-    int rec = 0;
 
     //OACK
     char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
     memset(oackBuff, 0, 516);
-    rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddr, &adrlen);
+
+
+    unsigned int adrlen = 0;
+    int rec = 0;
+
+    if (ipv4){
+        adrlen = sizeof(servaddrivp4);
+        rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddrivp4, &adrlen);
+    }else{
+        adrlen = sizeof(servaddrivp6);
+        rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddrivp6, &adrlen);
+    }
+
 
     
 
@@ -337,16 +338,29 @@ void readRequest(){
         ack[3] = ++ackNum;
     }
 
-    sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+    if (ipv4){
+        sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
+    }else{
+        sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
+    }
+    
 
     if (oackBuff[1] == 6 || rec == blocksize_i + 4){
         do{
-            rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddr, &adrlen);
+            if(ipv4){
+                rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddrivp4, &adrlen);
+            }else{
+                rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddrivp6, &adrlen);
+            }
             fwrite(&tr_reply[4], 1, rec - 4, cfile);
             memset(tr_reply, 0, blocksize_i + 4);
             ack[2] = ++ackNum >> 8;
             ack[3] = ackNum;
-            sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+            if (ipv4){
+                sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
+            }else{
+                sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
+            }
 
         }while (rec == blocksize_i + 4);
     }
