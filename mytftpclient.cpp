@@ -472,10 +472,10 @@ void writeRequest(){
         }
         if (blocksize_i != -1){
             if (oackVals.blksize == ""){
-                std::cout << "NOTICE: server refused blksize value, using default value\n";
+                std::cout << "NOTICE: server refused blksize value, using default TFTP value (512)\n";
                 blocksize_s = "512";
                 blocksize_i = 512;
-            }else if (oackVals.blksize == blocksize_s){
+            }else{// if (oackVals.blksize == blocksize_s){
                 blocksize_s = oackVals.blksize;
                 blocksize_i = std::stoi(blocksize_s);
             }
@@ -492,8 +492,6 @@ void writeRequest(){
     }else if (oackBuff[1] == 5){
         std::cerr << &oackBuff[4] << "\n";
         exit(1);
-    }else if (oackBuff[1] == 3){
-        
     }
 
     int ackNum = 0;
@@ -520,16 +518,22 @@ void writeRequest(){
             sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
             rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp6, &adrlen);
         }
+            printf("%i\t%i\n%i\t%i\n\n", ack[2], ack[3], dataBlock[2], dataBlock[3]);
         //restransmission in case of none/incorrect ack
-        /*
-        if (rec == -1 || (unsigned short) ack[2] != blockNum){
-            sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
-            rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddr, &adrlen);
-            if (rec == -1 || (unsigned short) ack[2] != blockNum){
+        if (rec == -1 || ack[2] != dataBlock[2] || ack[3] != dataBlock[3]){
+            printf("%i\t%i\n%i\t%i\n\n", ack[2], ack[3], dataBlock[2], dataBlock[3]);
+            if (ipv4){
+                sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
+                rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp4, &adrlen);
+            }else{
+                sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
+                rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp6, &adrlen);
+            }
+            if (rec == -1 || ack[2] != blockNum >> 8 || ack[3] != blockNum){
                 std::cerr << "Retransmission failed\n";
                 exit(1);
             }
-        }*/
+        }
         memset(&dataBlock[4], 0, blocksize_i);
         
     }while (num == blocksize_i);
