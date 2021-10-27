@@ -26,6 +26,7 @@ std::string mode;
 bool ipv4;
 std::string address;
 int port;
+bool lastCR;
 
 
 
@@ -38,7 +39,7 @@ void paramSet(){
     blocksize_i = -1;//TODO este zistit
     blocksize_s = "-1";
     multicast = false;
-    mode = "binary";
+    mode = "octet";
     ipv4 = true;
     address = "127.0.0.1";
     port = 69;
@@ -96,7 +97,7 @@ int paramCheck(std::string arguments){
             //std::cout << "-m value is:" << multicast << ":\n";
         }else if (arg == "-d"){
             path = value;
-            std::cout << "-d value is:" << path << ":\n";
+            //std::cout << "-d value is:" << path << ":\n";
         }else if (arg == "-t"){
             try{
                 timeout_i = std::stoi(value);
@@ -260,6 +261,57 @@ class OACK{
     }
 };
 
+void writeFile(char* buff, int num, FILE* file){
+
+    if(buff[2] == 0 && buff[3] == 1){
+        lastCR = false;
+    }
+    buff = &buff[4];
+
+    if (mode == "octet"){
+        fwrite(buff, 1, num, file);
+    }else{
+        int counter = 0;
+        char* dest = (char*) malloc(num*sizeof(char));
+        memset(dest, 0, num);
+        for (int i = 0; i < num; i++){
+            if (i == num - 1  && buff[i-1] == 13){
+                lastCR = true;
+                counter++;
+                continue;
+            }
+            if (i == 0){
+                if (buff[0] == 0 && lastCR){
+                    buff[i] = 13;
+                }
+                lastCR = false;
+            }
+            if (i != num - 1){
+                if(buff[i] == 13 && buff[i+1] == 10){
+                    dest[i-counter] = 10;
+                    counter++;
+                    i++;
+                    continue;
+                    //std::cout << "REWRITE CRLF\n";
+                }else if(buff[i] == 13 && buff[i+1] == 0){
+                    dest[i-counter] = 13;
+                    counter++;
+                    i++;
+                    continue;
+                    //std::cout << "REWRITE CRLF\n";
+                }
+            }
+            dest[i-counter] = buff[i];
+        }
+        /*std::cout << "WRITING THIS";
+        for (int i = 0; i< num - counter; i++){
+
+            printf("%i\t%c\n", dest[i], dest[i]);
+        }*/
+        fwrite(dest, 1, num - counter, file);
+        free(dest);
+    }
+}
 
 void readRequest(){
 
@@ -276,12 +328,11 @@ void readRequest(){
     }else{
         sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
         servaddrivp6.sin6_family = AF_INET6;
-        //servaddrivp6.sin6_addr.s6_addr = inet_addr(address.c_str()); 
+        //servaddrivp6.sin6_addr.s6_addr = inet_addr(address.c_str());
         inet_pton(AF_INET6, address.c_str(), &servaddrivp6.sin6_addr);
         servaddrivp6.sin6_port  = htons(port);
     }
     
-
 
 
 
@@ -327,16 +378,56 @@ void readRequest(){
 
         OACK oackVals(oackBuff, rec);
         //TODO vyriesit edge cases upravit bloxksize, timout, skontrolovat free space alebo ukoncit program
-        blocksize_s = oackVals.blksize;
-        blocksize_i = std::stoi(blocksize_s);
+        if (timeout_i != -1){
+            if (oackVals.timeout == ""){
+                std::cout << "NOTICE: server refused timeout value, using default value\n";
+            }else if (oackVals.timeout == timeout_s){
+                timeout.tv_sec = std::stoi(oackVals.timeout);
+                setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+                setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+            }else{
+                std::cerr << "SERVER MALFUNCTION proposed different timeout\n";
+                exit(1);
+            }
+        }
+        if (blocksize_i != -1){
+            if (oackVals.blksize == ""){
+                std::cout << "NOTICE: server refused blksize value, using default TFTP value (512)\n";
+                blocksize_s = "512";
+                blocksize_i = 512;
+            }else{// if (oackVals.blksize == blocksize_s){
+                blocksize_s = oackVals.blksize;
+                blocksize_i = std::stoi(blocksize_s);
+            }
+        }else{
+            blocksize_i = 512;
+            blocksize_s = "512";
+        }
+        if (oackVals.tsize != ""){
+            long unsigned tsize = 0;
+            try{
+                tsize = std::stoi(oackVals.tsize);
+            }catch (...){
+                std::cerr << "SERVER MALFUNCTION: responded with non numerical tsize value\n";
+                exit(1);
+            }
+            std::filesystem::path p = "./";
+            std::filesystem::space_info inf = std::filesystem::space(p);
+            if (tsize > inf.capacity){
+                std::cerr << "Not enough available storage\n";
+                exit(1);
+            }
+            
+        }
     }else if (oackBuff[1] == 8){
         //TODO options refused by server
     }else if (oackBuff[1] == 5){
-        //TODO normalny err
+        std::cerr << &oackBuff[4] << "\n";
+        exit(1);
     }
 
     int ackNum = 0;
-    FILE* cfile = fopen(path.filename().c_str(), "wb");
+    FILE* cfile = fopen(path.filename().c_str(), "wb+");
 
     char* tr_reply = (char*) malloc((4 + blocksize_i)*sizeof(char));
     memset(tr_reply, 0, blocksize_i + 4);
@@ -349,7 +440,7 @@ void readRequest(){
     ack[3] = ackNum;
 
     if (oackBuff[1] == 3){
-        fwrite(&oackBuff[4], 1, rec - 4, cfile);
+        writeFile(oackBuff, rec - 4, cfile);
         ack[3] = ++ackNum;
     }
 
@@ -367,7 +458,7 @@ void readRequest(){
             }else{
                 rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddrivp6, &adrlen);
             }
-            fwrite(&tr_reply[4], 1, rec - 4, cfile);
+            writeFile(tr_reply, rec - 4, cfile);
             memset(tr_reply, 0, blocksize_i + 4);
             ack[2] = ++ackNum >> 8;
             ack[3] = ackNum;
@@ -484,7 +575,7 @@ void writeRequest(){
             blocksize_s = "512";
         }
         if (oackVals.tsize != std::to_string(std::filesystem::file_size(path))){
-            std::cerr << "SERVER MALFUNCTION: -W did not echo tsize\n";
+            std::cerr << "SERVER MALFUNCTION: -W did not echo tsize correctly\n";
             exit(1);
         }
     }else if (oackBuff[1] == 8){
@@ -494,7 +585,6 @@ void writeRequest(){
         exit(1);
     }
 
-    int ackNum = 0;
     int blockNum = 0;
     int num = 0;
     FILE* cfile = fopen(path.filename().c_str(), "r");
