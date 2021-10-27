@@ -275,7 +275,7 @@ void writeFile(char* buff, int num, FILE* file){
         char* dest = (char*) malloc(num*sizeof(char));
         memset(dest, 0, num);
         for (int i = 0; i < num; i++){
-            if (i == num - 1  && buff[i-1] == 13){
+            if (i == num - 1  && buff[i] == 13){
                 lastCR = true;
                 counter++;
                 continue;
