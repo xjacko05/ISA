@@ -27,6 +27,7 @@ bool ipv4;
 std::string address;
 int port;
 bool lastCR;
+char lastC;
 
 
 
@@ -43,6 +44,8 @@ void paramSet(){
     ipv4 = true;
     address = "127.0.0.1";
     port = 69;
+
+    lastC = 69;
 }
 
 
@@ -122,7 +125,7 @@ int paramCheck(std::string arguments){
                 std::cerr << "PARAM ERR: unknown mode\n";
                 exit(1);
             }
-            //std::cout << "-c value is:" << mode << ":\n";
+            std::cout << "-c value is:" << mode << ":\n";
         }else if (arg == "-a"){
             address = value.substr(0, value.find(','));
             //https://www.tutorialspoint.com/validate-ipv4-address-using-regex-patterns-in-cplusplus
@@ -270,6 +273,8 @@ void writeFile(char* buff, int num, FILE* file){
 
     if (mode == "octet"){
         fwrite(buff, 1, num, file);
+    //}else if (mode == "netascii"){
+    //    fwrite(buff, 1, num, file);
     }else{
         int counter = 0;
         char* dest = (char*) malloc(num*sizeof(char));
@@ -481,6 +486,58 @@ void readRequest(){
     fclose(cfile);
 }
 
+int readFile(char* buff, int num, FILE* file){
+
+    //buff = &buff[4];
+
+    int bytesRead = 0;
+
+    if(mode == "octet"){
+        bytesRead = fread(&buff[4], 1, num, file);
+    }else{
+        char c;
+        for (int i = 0; i < num; i++){
+            if (i == 0){
+                if(lastC == 0 || lastC == 10){
+                    buff[i] = lastC;
+                    lastC = 69;
+                    continue;
+                }
+            }
+            c = fgetc(file);
+            if(feof(file)){
+                return i;
+            }
+            if (i == num - 1){
+                if(c == 10){
+                    buff[i] = 13;
+                    lastC = 10;
+                    continue;
+                }else if (c == 13){
+                    buff[i] = 13;
+                    lastC = 0;
+                    continue;
+                }
+            }
+            if (c == 10){
+                buff[i] = 13;
+                buff[i+1] = 10;
+                i++;
+            }else if (c == 13){
+                buff[i] = 13;
+                buff[i+1] = 0;
+                i++;
+            }else{
+                buff[i] = c;
+            }
+        }
+        bytesRead = num;
+    }
+
+    return bytesRead;
+    
+}
+
 void writeRequest(){
 
     int sockfd;
@@ -600,7 +657,7 @@ void writeRequest(){
     do{
         dataBlock[2] = ++blockNum >> 8;
         dataBlock[3] = blockNum;
-        num = fread(&dataBlock[4], 1, blocksize_i, cfile);
+        num = readFile(&dataBlock[4], blocksize_i, cfile);
         if (ipv4){
             sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
             rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp4, &adrlen);
@@ -608,10 +665,10 @@ void writeRequest(){
             sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
             rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp6, &adrlen);
         }
-            printf("%i\t%i\n%i\t%i\n\n", ack[2], ack[3], dataBlock[2], dataBlock[3]);
+            //printf("%i\t%i\n%i\t%i\n\n", ack[2], ack[3], dataBlock[2], dataBlock[3]);
         //restransmission in case of none/incorrect ack
         if (rec == -1 || ack[2] != dataBlock[2] || ack[3] != dataBlock[3]){
-            printf("%i\t%i\n%i\t%i\n\n", ack[2], ack[3], dataBlock[2], dataBlock[3]);
+            //printf("%i\t%i\n%i\t%i\n\n", ack[2], ack[3], dataBlock[2], dataBlock[3]);
             if (ipv4){
                 sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
                 rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp4, &adrlen);
