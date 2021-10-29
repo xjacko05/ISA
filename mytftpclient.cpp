@@ -14,6 +14,7 @@
 #include <regex>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <ctime>
 
 bool readON;
 std::filesystem::path path;
@@ -49,7 +50,12 @@ void paramSet(){
 }
 
 
-int paramCheck(std::string arguments){
+bool paramCheck(std::string arguments){
+
+    if(feof(stdin)){
+        std::cout << "\n";
+        return false;
+    }
 
     arguments = arguments.append(" ");
     //whitespace reduction
@@ -79,6 +85,8 @@ int paramCheck(std::string arguments){
         }
     }
 
+    bool readwriteSet = false;
+
     while (arguments.length() != 0){
         std::string arg = arguments.substr(0, arguments.find(' '));
         arguments = arguments.substr(arguments.find(' ')+1);
@@ -86,10 +94,22 @@ int paramCheck(std::string arguments){
         arguments = arguments.substr(arguments.find(' ')+1);
         
         if (arg == "-W"){
+            if(readwriteSet){
+                std::cerr << "PARAM ERR: -W and -R parameters can't be used simultaneously\n";
+                return false;
+            }else{
+                readwriteSet = true;
+            }
             readON = false;
             value = value.append(" ");
             arguments = value.append(arguments);
         }else if (arg == "-R"){
+            if(readwriteSet){
+                std::cerr << "PARAM ERR: -W and -R parameters can't be used simultaneously\n";
+                return false;
+            }else{
+                readwriteSet = true;
+            }
             readON = true;
             value = value.append(" ");
             arguments = value.append(arguments);
@@ -107,7 +127,7 @@ int paramCheck(std::string arguments){
                 timeout_s = std::to_string(timeout_i);
             }catch (...){
                 std::cerr << "PARAM ERR: timeout value must be integer\n";
-                exit(1);
+                return false;
             }
             //std::cout << "-t value is:" << timeout << ":\n";
         }else if (arg == "-s"){
@@ -116,16 +136,16 @@ int paramCheck(std::string arguments){
                 blocksize_s = std::to_string(blocksize_i);
             }catch (...){
                 std::cerr << "PARAM ERR: size value must be integer\n";
-                exit(1);
+                return false;
             }
             //std::cout << "-s value is:" << size << ":\n";
         }else if (arg == "-c"){
             mode = value;
             if (mode != "ascii" && mode != "netascii" && mode != "binary" && mode != "octet"){
                 std::cerr << "PARAM ERR: unknown mode\n";
-                exit(1);
+                return false;
             }
-            std::cout << "-c value is:" << mode << ":\n";
+            //std::cout << "-c value is:" << mode << ":\n";
         }else if (arg == "-a"){
             address = value.substr(0, value.find(','));
             //https://www.tutorialspoint.com/validate-ipv4-address-using-regex-patterns-in-cplusplus
@@ -138,25 +158,30 @@ int paramCheck(std::string arguments){
                 ipv4 = false;
             }else{
                 std::cerr << "PARAM ERR: invalid address\n";
-                exit(1);
+                return false;
             }
             try{
                 port = std::stoi(value.substr(value.find(',')+1));
             }catch (...){
                 std::cerr << "PARAM ERR: port number must be integer\n";
-                exit(1);
+                return false;
             }
             //std::cout << "-a value is:" << address << "," << port << ":\n";
         }
         //std::cout << "The rest is:" << arguments << ":\n\n";
     }
 
-    if (!readON && !std::filesystem::exists(path)){
-        std::cerr << "PARAM ERR: " << path << "does not exist\n";
-        exit(1);
+    if(!readwriteSet || path == ""){
+        std::cerr << "PARAM ERR: " << "invalid param(s)\n";
+        return false;
     }
 
-    return 1;
+    if (!readON && !std::filesystem::exists(path)){
+        std::cerr << "PARAM ERR: " << path << "does not exist\n";
+        return false;
+    }
+
+    return true;
 }
 
 class Request{
@@ -189,7 +214,7 @@ class Request{
 
             int ptr = 2;
 
-            std::cout << this->size << "\n";
+            //std::cout << this->size << "\n";
 
 
             memcpy(&message[ptr++], path.c_str(), strlen(path.c_str()));
@@ -222,6 +247,12 @@ class Request{
             */
         }
 };
+
+void printTime(){
+    std::time_t result = std::time(nullptr);
+    char tmp[100];
+    std::strftime(tmp, sizeof(tmp), "[%Y-%m-%d %H:%M:%S] " ,std::localtime(&result));
+}
 
 class OACK{
     public:
@@ -318,6 +349,15 @@ void writeFile(char* buff, int num, FILE* file){
     }
 }
 
+void printStatus(unsigned long block, unsigned int size){
+
+    if (readON){
+        std::cout << "Recieving DATA ...\t\t" << block*blocksize_i << "\tof\t" << size << " B\n";
+    }else{
+        std::cout << "Sending DATA ...\t\t" << block*blocksize_i << "\tof\t" << size << " B\n";
+    }
+}
+
 void readRequest(){
 
     int sockfd;
@@ -338,15 +378,15 @@ void readRequest(){
         servaddrivp6.sin6_port  = htons(port);
     }
     
-
-
-
     Request req;
-    std::cout << req.size << "\n";
-
+    //std::cout << req.size << "\n";
+/*
     for (int i = 0; i < req.size; i++){
         std::cout << (int) req.message[i] << "\t" << req.message[i] << "\n";
     }
+*/
+    printTime();
+    std::cout << "Requesting READ of " << path << " from " << address << ":" << port << "\n";
 
     //sending request
     if (ipv4){
@@ -378,6 +418,7 @@ void readRequest(){
 
 
     
+    unsigned long tsize = 0;
 
     if (oackBuff[1] == 6){
 
@@ -387,7 +428,12 @@ void readRequest(){
             if (oackVals.timeout == ""){
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
             }else if (oackVals.timeout == timeout_s){
-                timeout.tv_sec = std::stoi(oackVals.timeout);
+                try{
+                    timeout.tv_sec = std::stoi(oackVals.timeout);
+                }catch (...){
+                    std::cerr << "SERVER MALFUNCTION: responded with non numerical timeout value\n";
+                    exit(1);
+                }
                 setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
                 setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
             }else{
@@ -397,19 +443,23 @@ void readRequest(){
         }
         if (blocksize_i != -1){
             if (oackVals.blksize == ""){
-                std::cout << "NOTICE: server refused blksize value, using default TFTP value (512)\n";
+                std::cout << "NOTICE: server refused blksize value, using default TFTPv2 value (512)\n";
                 blocksize_s = "512";
                 blocksize_i = 512;
             }else{// if (oackVals.blksize == blocksize_s){
-                blocksize_s = oackVals.blksize;
-                blocksize_i = std::stoi(blocksize_s);
+                try{
+                    blocksize_s = oackVals.blksize;
+                    blocksize_i = std::stoi(blocksize_s);
+                }catch (...){
+                    std::cerr << "SERVER MALFUNCTION: responded with non numerical blksize value\n";
+                    exit(1);
+                }
             }
         }else{
             blocksize_i = 512;
             blocksize_s = "512";
         }
         if (oackVals.tsize != ""){
-            long unsigned tsize = 0;
             try{
                 tsize = std::stoi(oackVals.tsize);
             }catch (...){
@@ -425,13 +475,14 @@ void readRequest(){
             
         }
     }else if (oackBuff[1] == 8){
-        //TODO options refused by server
+        std::cerr << "TFTP opcode 8\n";
+        exit(1);
     }else if (oackBuff[1] == 5){
         std::cerr << &oackBuff[4] << "\n";
         exit(1);
     }
 
-    int ackNum = 0;
+    unsigned long ackNum = 0;
     FILE* cfile = fopen(path.filename().c_str(), "wb+");
 
     char* tr_reply = (char*) malloc((4 + blocksize_i)*sizeof(char));
@@ -454,6 +505,9 @@ void readRequest(){
     }else{
         sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
     }
+
+    printTime();
+    std::cout << "Starting transport...\n";
     
 
     if (oackBuff[1] == 6 || rec == blocksize_i + 4){
@@ -475,12 +529,15 @@ void readRequest(){
 
         }while (rec == blocksize_i + 4);
     }
-
+/*
     printf("BYTES RECIEVED: %i\n", rec);
     for (int i = 0; i < 30; i++){
         printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
     }
-    
+*/
+    printTime();
+    std::cout << "Transport finished sucessfully\n";
+
     close(sockfd);
 
     fclose(cfile);
@@ -566,11 +623,14 @@ void writeRequest(){
     setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
 
     Request req;
-    std::cout << req.size << "\n";
+    //std::cout << req.size << "\n";
 
-    for (int i = 0; i < req.size; i++){
+/*    for (int i = 0; i < req.size; i++){
         std::cout << (int) req.message[i] << "\t" << req.message[i] << "\n";
     }
+*/
+    printTime();
+    std::cout << "Requesting READ of " << path << " from " << address << ":" << port << "\n";
 
     //sending request
     if (ipv4){
@@ -610,7 +670,12 @@ void writeRequest(){
             if (oackVals.timeout == ""){
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
             }else if (oackVals.timeout == timeout_s){
-                timeout.tv_sec = std::stoi(oackVals.timeout);
+                try{
+                    timeout.tv_sec = std::stoi(oackVals.timeout);
+                }catch (...){
+                    std::cerr << "SERVER MALFUNCTION: responded with non numerical timeout value\n";
+                    exit(1);
+                }
                 setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
                 setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
             }else{
@@ -620,23 +685,31 @@ void writeRequest(){
         }
         if (blocksize_i != -1){
             if (oackVals.blksize == ""){
-                std::cout << "NOTICE: server refused blksize value, using default TFTP value (512)\n";
+                std::cout << "NOTICE: server refused blksize value, using default TFTPv2 value (512)\n";
                 blocksize_s = "512";
                 blocksize_i = 512;
             }else{// if (oackVals.blksize == blocksize_s){
-                blocksize_s = oackVals.blksize;
-                blocksize_i = std::stoi(blocksize_s);
+                try{
+                    blocksize_s = oackVals.blksize;
+                    blocksize_i = std::stoi(blocksize_s);
+                }catch (...){
+                    std::cerr << "SERVER MALFUNCTION: responded with non numerical blksize value\n";
+                    exit(1);
+                }
             }
         }else{
             blocksize_i = 512;
             blocksize_s = "512";
         }
-        if (oackVals.tsize != std::to_string(std::filesystem::file_size(path))){
-            std::cerr << "SERVER MALFUNCTION: -W did not echo tsize correctly\n";
-            exit(1);
+        if (oackVals.tsize != ""){
+            if (oackVals.tsize != std::to_string(std::filesystem::file_size(path))){
+                std::cerr << "SERVER MALFUNCTION: -W did not echo tsize correctly\n";
+                exit(1);
+            }
         }
     }else if (oackBuff[1] == 8){
-        //TODO options refused by server, asi skusit bez options
+        std::cerr << "TFTP opcode 8\n";
+        exit(1);
     }else if (oackBuff[1] == 5){
         std::cerr << &oackBuff[4] << "\n";
         exit(1);
@@ -653,6 +726,9 @@ void writeRequest(){
     //ack
     char* ack = (char*) malloc(4 * sizeof (char));
     memset(ack, 0, 4);
+
+    printTime();
+    std::cout << "Starting transport...\n";
 
     do{
         dataBlock[2] = ++blockNum >> 8;
@@ -684,12 +760,14 @@ void writeRequest(){
         memset(&dataBlock[4], 0, blocksize_i);
         
     }while (num == blocksize_i);
-
+/*
     printf("BYTES RECIEVED: %i\n", rec);
     for (int i = 0; i < 30; i++){
         printf( "%i=\t%c\t%i\n", i, *(dataBlock + i), *(dataBlock + i));
     }
-    
+*/
+    printTime();
+    std::cout << "Transport finished sucessfully\n";
     close(sockfd);
 
     fclose(cfile);
@@ -697,18 +775,20 @@ void writeRequest(){
 
 int main(){
 
-    paramSet();
 
-    std::cout << ">";
-    std::string input;
-    getline(std::cin, input);
 
-    paramCheck(input);
-
-    if (readON){
-        readRequest();
-    } else if (!readON){
-        writeRequest();
+    while(!feof(stdin)){
+        paramSet();
+        std::cout << ">";
+        std::string input;
+        getline(std::cin, input);
+        if(paramCheck(input)){
+        if (readON){
+            readRequest();
+        }else if(!readON){
+            writeRequest();
+        }
+        }
     }
 
 
