@@ -190,7 +190,7 @@ class Request{
         char* message;
 
         Request(){
-            this->size = 2 + strlen(path.c_str()) + 1 + strlen(mode.c_str()) + 1 + strlen("blksize") + 1 + strlen(blocksize_s.c_str()) + 1;
+            this->size = 2 + strlen(mode.c_str()) + 1 + strlen("blksize") + 1 + strlen(blocksize_s.c_str()) + 1;
             if (timeout_i != -1){
                 this->size += strlen("timeout") + 1 + strlen(timeout_s.c_str()) + 1;
             }
@@ -198,8 +198,10 @@ class Request{
             std::string t_size;
             if (readON){
                 t_size = "0";
+                this->size += strlen(path.c_str()) + 1;
             }else if (!readON){
                 t_size = std::to_string(std::filesystem::file_size(path));
+                this->size += strlen(path.filename().c_str()) + 1;
             }
             this->size += strlen("tsize") + 1 + strlen(t_size.c_str()) + 1;
 
@@ -216,9 +218,13 @@ class Request{
 
             //std::cout << this->size << "\n";
 
-
-            memcpy(&message[ptr++], path.c_str(), strlen(path.c_str()));
-            ptr += strlen(path.c_str());
+            if (readON){
+                memcpy(&message[ptr++], path.c_str(), strlen(path.c_str()));
+                ptr += strlen(path.c_str());
+            }else{
+                memcpy(&message[ptr++], path.filename().c_str(), strlen(path.filename().c_str()));
+                ptr += strlen(path.filename().c_str());
+            }
             memcpy(&message[ptr++], mode.c_str(), strlen(mode.c_str()));
             ptr += strlen(mode.c_str());
             memcpy(&message[ptr++], "blksize", strlen("blksize"));
