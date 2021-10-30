@@ -38,14 +38,13 @@ void paramSet(){
     path = "";
     timeout_i = -1;
     timeout_s = "";
-    blocksize_i = -1;//TODO este zistit
+    blocksize_i = -1;
     blocksize_s = "-1";
     multicast = false;
     mode = "octet";
     ipv4 = true;
     address = "127.0.0.1";
     port = 69;
-
     lastC = 69;
 }
 
@@ -117,10 +116,8 @@ bool paramCheck(std::string arguments){
             multicast = true;
             value = value.append(" ");
             arguments = value.append(arguments);
-            //std::cout << "-m value is:" << multicast << ":\n";
         }else if (arg == "-d"){
             path = value;
-            //std::cout << "-d value is:" << path << ":\n";
         }else if (arg == "-t"){
             try{
                 timeout_i = std::stoi(value);
@@ -129,7 +126,6 @@ bool paramCheck(std::string arguments){
                 std::cerr << "PARAM ERR: timeout value must be integer\n";
                 return false;
             }
-            //std::cout << "-t value is:" << timeout << ":\n";
         }else if (arg == "-s"){
             try{
                 blocksize_i = std::stoll(value);
@@ -138,17 +134,14 @@ bool paramCheck(std::string arguments){
                 std::cerr << "PARAM ERR: size value must be integer\n";
                 return false;
             }
-            //std::cout << "-s value is:" << size << ":\n";
         }else if (arg == "-c"){
             mode = value;
             if (mode != "ascii" && mode != "netascii" && mode != "binary" && mode != "octet"){
                 std::cerr << "PARAM ERR: unknown mode\n";
                 return false;
             }
-            //std::cout << "-c value is:" << mode << ":\n";
         }else if (arg == "-a"){
             address = value.substr(0, value.find(','));
-            //https://www.tutorialspoint.com/validate-ipv4-address-using-regex-patterns-in-cplusplus
             std::regex ipv4Re("^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$");
             //https://stackoverflow.com/questions/53497/regular-expression-that-matches-valid-ipv6-addresses
             std::regex ipv6Re("([a-fA-F0-9:]+:+)+[a-fA-F0-9]+$");
@@ -166,9 +159,7 @@ bool paramCheck(std::string arguments){
                 std::cerr << "PARAM ERR: port number must be integer\n";
                 return false;
             }
-            //std::cout << "-a value is:" << address << "," << port << ":\n";
         }
-        //std::cout << "The rest is:" << arguments << ":\n\n";
     }
 
     if(!readwriteSet || path == ""){
@@ -178,6 +169,11 @@ bool paramCheck(std::string arguments){
 
     if (!readON && !std::filesystem::exists(path)){
         std::cerr << "PARAM ERR: " << path << "does not exist\n";
+        return false;
+    }
+
+    if (multicast){
+        std::cerr << "Multicast not supported :(\n";
         return false;
     }
 
@@ -216,8 +212,6 @@ class Request{
 
             int ptr = 2;
 
-            //std::cout << this->size << "\n";
-
             if (readON){
                 memcpy(&message[ptr++], path.c_str(), strlen(path.c_str()));
                 ptr += strlen(path.c_str());
@@ -243,14 +237,6 @@ class Request{
             ptr += strlen("tsize");
             memcpy(&message[ptr++], t_size.c_str(), strlen(t_size.c_str()));
             ptr += strlen(t_size.c_str());
-
-            /*
-            int i = 0;
-            while(i<this->size){
-                printf("%i\t%i\t%c\n", i, message[i], message[i]);
-                i++;
-            }
-            */
         }
 
         ~Request(){
@@ -280,26 +266,20 @@ class OACK{
 
             for (int ptr = 2; ptr != rec;){
             if (!strcmp((char*)&message[ptr], "blksize")){
-                //std::cout << (char*)&message[ptr] << "\t\t";
                 ptr += strlen("blksize") + 1;
                 blksize = (char*)&message[ptr];
-                //std::cout << (char*)&message[ptr] << std::endl;
                 ptr += strlen((char*)&message[ptr]) + 1;
 
             }
             if (!strcmp((char*)&message[ptr], "timeout")){
-                //std::cout << (char*)&message[ptr] << "\t\t";
                 ptr += strlen("timeout") + 1;
                 timeout = (char*)&message[ptr];
-                //std::cout << (char*)&message[ptr] << std::endl;
                 ptr += strlen((char*)&message[ptr]) + 1;
 
             }
             if (!strcmp((char*)&message[ptr], "tsize")){
-                //std::cout << (char*)&message[ptr] << "\t\t";
                 ptr += strlen("tsize") + 1;
                 tsize = (char*)&message[ptr];
-                //std::cout << (char*)&message[ptr] << std::endl;
                 ptr += strlen((char*)&message[ptr]) + 1;
 
             }
@@ -316,8 +296,6 @@ void writeFile(char* buff, int num, FILE* file){
 
     if (mode == "octet"){
         fwrite(buff, 1, num, file);
-    //}else if (mode == "netascii"){
-    //    fwrite(buff, 1, num, file);
     }else{
         int counter = 0;
         char* dest = (char*) malloc(num*sizeof(char));
@@ -340,22 +318,15 @@ void writeFile(char* buff, int num, FILE* file){
                     counter++;
                     i++;
                     continue;
-                    //std::cout << "REWRITE CRLF\n";
                 }else if(buff[i] == 13 && buff[i+1] == 0){
                     dest[i-counter] = 13;
                     counter++;
                     i++;
                     continue;
-                    //std::cout << "REWRITE CRLF\n";
                 }
             }
             dest[i-counter] = buff[i];
         }
-        /*std::cout << "WRITING THIS";
-        for (int i = 0; i< num - counter; i++){
-
-            printf("%i\t%c\n", dest[i], dest[i]);
-        }*/
         fwrite(dest, 1, num - counter, file);
         free(dest);
     }
@@ -388,7 +359,6 @@ int readRequest(){
     int sockfd;
     struct sockaddr_in servaddrivp4;
     struct sockaddr_in6 servaddrivp6;
-    //bzero(&servaddr, sizeof(servaddr));
 
     if (ipv4){
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -398,7 +368,6 @@ int readRequest(){
     }else{
         sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
         servaddrivp6.sin6_family = AF_INET6;
-        //servaddrivp6.sin6_addr.s6_addr = inet_addr(address.c_str());
         inet_pton(AF_INET6, address.c_str(), &servaddrivp6.sin6_addr);
         servaddrivp6.sin6_port  = htons(port);
     }
@@ -408,7 +377,6 @@ int readRequest(){
         std::cerr << "ERROR: Socket creation failed\n";
         return 1;
     }
-
 
     struct timeval timeout;
     timeout.tv_sec = 3;
@@ -427,7 +395,6 @@ int readRequest(){
         sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
     }
 
-
     //OACK
     char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
     memset(oackBuff, 0, 516);
@@ -435,7 +402,6 @@ int readRequest(){
     toclean[0] = oackBuff;
     toclean[1] = nullptr;
     toclean[2] = nullptr;
-
 
     unsigned int adrlen = 0;
     int rec = 0;
@@ -485,7 +451,7 @@ int readRequest(){
                 std::cout << "NOTICE: server refused blksize value, using default TFTPv2 value (512)\n";
                 blocksize_s = "512";
                 blocksize_i = 512;
-            }else{// if (oackVals.blksize == blocksize_s){
+            }else{
                 try{
                     blocksize_i = std::stoll(blocksize_s);
                     if(oackVals.blksize != blocksize_s){
@@ -562,7 +528,6 @@ int readRequest(){
         sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
     }
     
-
     if (oackBuff[1] == 6 || rec == blocksize_i + 4){
         do{
             if(ipv4){
@@ -596,12 +561,7 @@ int readRequest(){
             }
         }while (rec == blocksize_i + 4);
     }
-/*
-    printf("BYTES RECIEVED: %i\n", rec);
-    for (int i = 0; i < 30; i++){
-        printf( "%i=\t%c\t%i\n", i, *(tr_reply + i), *(tr_reply + i));
-    }
-*/
+
     printTime();
     std::cout << "Transport finished sucessfully\n";
 
@@ -612,12 +572,10 @@ int readRequest(){
 
 int readFile(char* buff, int num, FILE* file){
 
-    //buff = &buff[4];
-
     int bytesRead = 0;
 
     if(mode == "octet"){
-        bytesRead = fread(&buff[4], 1, num, file);
+        bytesRead = fread(buff, 1, num, file);//fread(&buff[4], 1, num, file);
     }else{
         char c;
         for (int i = 0; i < num; i++){
@@ -657,9 +615,7 @@ int readFile(char* buff, int num, FILE* file){
         }
         bytesRead = num;
     }
-
     return bytesRead;
-    
 }
 
 int writeRequest(){
@@ -667,7 +623,6 @@ int writeRequest(){
     int sockfd;
     struct sockaddr_in servaddrivp4;
     struct sockaddr_in6 servaddrivp6;
-    //bzero(&servaddr, sizeof(servaddr));
 
     if (ipv4){
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -677,7 +632,6 @@ int writeRequest(){
     }else{
         sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
         servaddrivp6.sin6_family = AF_INET6;
-        //servaddrivp6.sin6_addr.s6_addr = inet_addr(address.c_str()); 
         inet_pton(AF_INET6, address.c_str(), &servaddrivp6.sin6_addr);
         servaddrivp6.sin6_port  = htons(port);
     }
@@ -688,7 +642,6 @@ int writeRequest(){
         return 1;
     }
 
-
     struct timeval timeout;
     timeout.tv_sec = 3;
     timeout.tv_usec = 0;
@@ -696,7 +649,6 @@ int writeRequest(){
     setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
 
     Request req;
-    //std::cout << req.size << "\n";
 
     printTime();
     std::cout << "Requesting WRITE of " << path << " TO " << address << ":" << port << "\n";
@@ -707,12 +659,6 @@ int writeRequest(){
     }else{
         sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
     }
-/*
-    struct ifreq ifr;
-    int rr;
-    //rr = ioctl(sockfd, SIOCGIFMTU, (caddr_t)&ifr);
-    std::cout << "MAX MTU is\t" << rr << "\t" << ifr.ifr_ifrn.ifrn_name << "\n";
-*/
 
     //OACK
     char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
@@ -739,8 +685,6 @@ int writeRequest(){
         cleanup(sockfd, nullptr, toclean);
         return 1;
     }
-
-    
 
     if (oackBuff[1] == 6){
 
@@ -770,7 +714,7 @@ int writeRequest(){
                 std::cout << "NOTICE: server refused blksize value, using default TFTPv2 value (512)\n";
                 blocksize_s = "512";
                 blocksize_i = 512;
-            }else{// if (oackVals.blksize == blocksize_s){
+            }else{
                 try{
                     blocksize_i = std::stoll(oackVals.blksize);
                     if(oackVals.blksize != blocksize_s){
@@ -856,12 +800,7 @@ int writeRequest(){
         memset(&dataBlock[4], 0, blocksize_i);
         
     }while (num == blocksize_i);
-/*
-    printf("BYTES RECIEVED: %i\n", rec);
-    for (int i = 0; i < 30; i++){
-        printf( "%i=\t%c\t%i\n", i, *(dataBlock + i), *(dataBlock + i));
-    }
-*/
+
     printTime();
     std::cout << "Transport finished sucessfully\n";
 
@@ -885,6 +824,6 @@ int main(){
             }
         }
     }
-
+    
     return 0;
 }
