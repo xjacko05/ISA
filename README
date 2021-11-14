@@ -1,0 +1,5 @@
+TFPT klient
+multicast nie je podporovany
+pozadovana verzia CPP: c++17
+odmietnutie parametra "-t": klient nastavi svoj timeout pre prijimanie aj pre odosielanie na 3 sekundy
+odmietnutie parametra "-s": klient pouzije predvolenu hodnotu TFTP protkolu (512 bajtov)
