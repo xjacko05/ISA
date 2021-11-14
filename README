@@ -1,4 +1,5 @@
 TFPT klient
+Kod nie je prelozitelny na serveri merlin nakolko merver merlin neobsahuje kniznicu filesystem. Na referencnom virtualnom stroji kod funguje.
 multicast nie je podporovany
 pozadovana verzia CPP: c++17
 odmietnutie parametra "-t": klient nastavi svoj timeout pre prijimanie aj pre odosielanie na 3 sekundy
