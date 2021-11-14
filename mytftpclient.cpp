@@ -31,7 +31,7 @@ bool lastCR;
 char lastC;
 
 
-
+//sets parameters to their default values
 void paramSet(){
 
     readON = true;
@@ -39,7 +39,7 @@ void paramSet(){
     timeout_i = -1;
     timeout_s = "";
     blocksize_i = -1;
-    blocksize_s = "-1";
+    blocksize_s = "512";
     multicast = false;
     mode = "octet";
     ipv4 = true;
@@ -49,6 +49,7 @@ void paramSet(){
 }
 
 
+//check if parameters are present and valid
 bool paramCheck(std::string arguments){
 
     if(feof(stdin)){
@@ -86,6 +87,7 @@ bool paramCheck(std::string arguments){
 
     bool readwriteSet = false;
 
+    //argument parsing
     while (arguments.length() != 0){
         std::string arg = arguments.substr(0, arguments.find(' '));
         arguments = arguments.substr(arguments.find(' ')+1);
@@ -143,8 +145,7 @@ bool paramCheck(std::string arguments){
         }else if (arg == "-a"){
             address = value.substr(0, value.find(','));
             std::regex ipv4Re("^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$");
-            //https://stackoverflow.com/questions/53497/regular-expression-that-matches-valid-ipv6-addresses
-            std::regex ipv6Re("([a-fA-F0-9:]+:+)+[a-fA-F0-9]+$");
+            std::regex ipv6Re("^[0123456789a-fA-F\\.:]{2,}$");
             if (std::regex_match(address, ipv4Re)){
                 ipv4 = true;
             }else if (std::regex_match(address, ipv6Re)){
@@ -180,6 +181,8 @@ bool paramCheck(std::string arguments){
     return true;
 }
 
+
+//class used to parse arguments into the request packet
 class Request{
     public:
         int size;
@@ -244,6 +247,8 @@ class Request{
         }
 };
 
+
+//prints timestamp
 void printTime(){
 
     std::time_t result = std::time(nullptr);
@@ -252,6 +257,8 @@ void printTime(){
     std::cout << tmp;
 }
 
+
+//class used to parse Option acknowledgement packet
 class OACK{
     public:
         std::string blksize;
@@ -287,6 +294,8 @@ class OACK{
     }
 };
 
+
+//writes block of data into the file, converts data from telnet spec if necessary
 void writeFile(char* buff, int num, FILE* file){
 
     if(buff[2] == 0 && buff[3] == 1){
@@ -332,15 +341,8 @@ void writeFile(char* buff, int num, FILE* file){
     }
 }
 
-void printStatus(unsigned long block, unsigned int size){
 
-    if (readON){
-        std::cout << "Recieving DATA ...\t\t" << block*blocksize_i << "\tof\t" << size << " B\n";
-    }else{
-        std::cout << "Sending DATA ...\t\t" << block*blocksize_i << "\tof\t" << size << " B\n";
-    }
-}
-
+//closes socket and file, deallocates memory
 void cleanup(int sockfd, FILE* file, char* arr[3]){
 
     close(sockfd);
@@ -354,8 +356,11 @@ void cleanup(int sockfd, FILE* file, char* arr[3]){
     }
 }
 
+
+//function executing read request
 int readRequest(){
 
+    //socket creation
     int sockfd;
     struct sockaddr_in servaddrivp4;
     struct sockaddr_in6 servaddrivp6;
@@ -388,7 +393,7 @@ int readRequest(){
     printTime();
     std::cout << "Requesting READ of " << path << " from " << address << ":" << port << "\n";
 
-    //sending request
+    //sending request itself
     if (ipv4){
         sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
     }else{
@@ -423,10 +428,10 @@ int readRequest(){
     
     unsigned long long tsize = 0;
 
+    //parsing server reply
     if (oackBuff[1] == 6){
 
         OACK oackVals(oackBuff, rec);
-        //TODO vyriesit edge cases upravit bloxksize, timout, skontrolovat free space alebo ukoncit program
         if (timeout_i != -1){
             if (oackVals.timeout == ""){
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
@@ -465,7 +470,6 @@ int readRequest(){
                 }
             }
         }else{
-            //TODO in case of no blksize argument
             blocksize_i = 512;
             blocksize_s = "512";
         }
@@ -528,6 +532,7 @@ int readRequest(){
         sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
     }
     
+    //actual data transport
     if (oackBuff[1] == 6 || rec == blocksize_i + 4){
         do{
             if(ipv4){
@@ -535,6 +540,7 @@ int readRequest(){
             }else{
                 rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddrivp6, &adrlen);
             }
+            //restransmission in case of none/incorrect ack
             if (rec == -1 || (ack[2] == tr_reply[2] && ack[3] == tr_reply[3])){
                 std::cout << "NOTICE: block no. " << ackNum + 1 << " not recieved, retransmitting ack...\n";
                 if(ipv4){
@@ -570,12 +576,14 @@ int readRequest(){
     return 0;
 }
 
+
+//read block of data from the file, converts data to telnet spec if necessary
 int readFile(char* buff, int num, FILE* file){
 
     int bytesRead = 0;
 
     if(mode == "octet"){
-        bytesRead = fread(buff, 1, num, file);//fread(&buff[4], 1, num, file);
+        bytesRead = fread(buff, 1, num, file);
     }else{
         char c;
         for (int i = 0; i < num; i++){
@@ -618,8 +626,11 @@ int readFile(char* buff, int num, FILE* file){
     return bytesRead;
 }
 
+
+//function executing write request
 int writeRequest(){
 
+    //socket creation
     int sockfd;
     struct sockaddr_in servaddrivp4;
     struct sockaddr_in6 servaddrivp6;
@@ -653,7 +664,7 @@ int writeRequest(){
     printTime();
     std::cout << "Requesting WRITE of " << path << " TO " << address << ":" << port << "\n";
 
-    //sending request
+    //sending request itself
     if (ipv4){
         sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
     }else{
@@ -686,10 +697,10 @@ int writeRequest(){
         return 1;
     }
 
+    //parsing server reply
     if (oackBuff[1] == 6){
 
         OACK oackVals(oackBuff, rec);
-        //TODO vyriesit edge cases upravit bloxksize, timout, skontrolovat free space alebo ukoncit program
         if (timeout_i != -1){
             if (oackVals.timeout == ""){
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
@@ -728,7 +739,6 @@ int writeRequest(){
                 }
             }
         }else{
-            //TODO in case of no blksize argument
             blocksize_i = 512;
             blocksize_s = "512";
         }
@@ -770,6 +780,7 @@ int writeRequest(){
     printTime();
     std::cout << "Starting transport...\n";
 
+    //actual data transport
     do{
         dataBlock[2] = ++blockNum >> 8;
         dataBlock[3] = blockNum;
@@ -808,6 +819,7 @@ int writeRequest(){
 
     return 0;
 }
+
 
 int main(){
 
