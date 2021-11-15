@@ -32,6 +32,16 @@ bool lastCR;
 char lastC;
 
 
+//prints timestamp
+void printTime(){
+
+    std::time_t result = std::time(nullptr);
+    char tmp[100];
+    std::strftime(tmp, sizeof(tmp), "[%Y-%m-%d %H:%M:%S] " ,std::localtime(&result));
+    std::cout << tmp;
+}
+
+
 //sets parameters to their default values
 void paramSet(){
 
@@ -97,6 +107,7 @@ bool paramCheck(std::string arguments){
         
         if (arg == "-W"){
             if(readwriteSet){
+                printTime();
                 std::cerr << "PARAM ERR: -W and -R parameters can't be used simultaneously\n";
                 return false;
             }else{
@@ -107,6 +118,7 @@ bool paramCheck(std::string arguments){
             arguments = value.append(arguments);
         }else if (arg == "-R"){
             if(readwriteSet){
+                printTime();
                 std::cerr << "PARAM ERR: -W and -R parameters can't be used simultaneously\n";
                 return false;
             }else{
@@ -126,6 +138,7 @@ bool paramCheck(std::string arguments){
                 timeout_i = std::stoi(value);
                 timeout_s = std::to_string(timeout_i);
             }catch (...){
+                printTime();
                 std::cerr << "PARAM ERR: timeout value must be integer\n";
                 return false;
             }
@@ -134,6 +147,7 @@ bool paramCheck(std::string arguments){
                 blocksize_i = std::stoll(value);
                 blocksize_s = std::to_string(blocksize_i);
             }catch (...){
+                printTime();
                 std::cerr << "PARAM ERR: size value must be integer\n";
                 return false;
             }
@@ -141,8 +155,14 @@ bool paramCheck(std::string arguments){
             mode = value;
             boost::algorithm::to_lower(mode);
             if (mode != "ascii" && mode != "netascii" && mode != "binary" && mode != "octet"){
+                printTime();
                 std::cerr << "PARAM ERR: unknown mode\n";
                 return false;
+            }
+            if (mode == "ascii"){
+                mode = "netascii";
+            }else if (mode == "binary"){
+                mode = "octet";
             }
         }else if (arg == "-a"){
             address = value.substr(0, value.find(','));
@@ -153,12 +173,14 @@ bool paramCheck(std::string arguments){
             }else if (std::regex_match(address, ipv6Re)){
                 ipv4 = false;
             }else{
+                printTime();
                 std::cerr << "PARAM ERR: invalid address\n";
                 return false;
             }
             try{
                 port = std::stoi(value.substr(value.find(',')+1));
             }catch (...){
+                printTime();
                 std::cerr << "PARAM ERR: port number must be integer\n";
                 return false;
             }
@@ -166,16 +188,19 @@ bool paramCheck(std::string arguments){
     }
 
     if(!readwriteSet || path == ""){
+        printTime();
         std::cerr << "PARAM ERR: " << "invalid param(s)\n";
         return false;
     }
 
     if (!readON && !std::filesystem::exists(path)){
+        printTime();
         std::cerr << "PARAM ERR: " << path << "does not exist\n";
         return false;
     }
 
     if (multicast && !ipv4){
+        printTime();
         std::cerr << "ipv6 Multicast not supported :(\n";
         return false;
     }
@@ -191,6 +216,7 @@ class Request{
         char* message;
 
         Request(){
+            //size determination
             this->size = 2 + strlen(mode.c_str()) + 1 + strlen("blksize") + 1 + strlen(blocksize_s.c_str()) + 1;
             if (timeout_i != -1){
                 this->size += strlen("timeout") + 1 + strlen(timeout_s.c_str()) + 1;
@@ -220,6 +246,7 @@ class Request{
 
             int ptr = 2;
 
+            //argument fill
             if (readON){
                 memcpy(&message[ptr++], path.c_str(), strlen(path.c_str()));
                 ptr += strlen(path.c_str());
@@ -257,16 +284,6 @@ class Request{
 };
 
 
-//prints timestamp
-void printTime(){
-
-    std::time_t result = std::time(nullptr);
-    char tmp[100];
-    std::strftime(tmp, sizeof(tmp), "[%Y-%m-%d %H:%M:%S] " ,std::localtime(&result));
-    std::cout << tmp;
-}
-
-
 //class used to parse Option acknowledgement packet
 class OACK{
     public:
@@ -285,7 +302,6 @@ class OACK{
             port = "";
 
             for (int i = 2; i != rec; i++){
-                //printf("%i\t%c\t%i\n", i, message[i], message[i]);
                 if (message[i] > 64 && message[i] < 91){
                     message[i] += 32;
                 }
@@ -316,7 +332,6 @@ class OACK{
                 while (message[ptr] != ','){
                     port += message[ptr++];
                 }
-                //ptr+=3;
             }else{
                 ptr++;
             }
@@ -413,6 +428,7 @@ int readRequest(){
         return 1;
     }
 
+    //setting timeout
     struct timeval timeout;
     timeout.tv_sec = 3;
     timeout.tv_usec = 0;
@@ -439,7 +455,7 @@ int readRequest(){
         sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
     }
 
-    //OACK
+    //OACK buffer
     char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
     memset(oackBuff, 0, 516);
     char* toclean[3];
@@ -450,6 +466,7 @@ int readRequest(){
     unsigned int adrlen = 0;
     int rec = 0;
 
+    //recieving OACK
     if (ipv4){
         adrlen = sizeof(servaddrivp4);
         rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddrivp4, &adrlen);
@@ -469,16 +486,20 @@ int readRequest(){
 
     //parsing server reply
     OACK oackVals;
+
+    //in case reply is OACK
     if (oackBuff[1] == 6){
 
         oackVals.parse(oackBuff, rec);
         if (timeout_i != -1){
             if (oackVals.timeout == ""){
+                printTime();
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
             }else if (oackVals.timeout == timeout_s){
                 try{
                     timeout.tv_sec = std::stoi(oackVals.timeout);
                 }catch (...){
+                    printTime();
                     std::cerr << "ABORTING TRANSFER: server responded with non numerical timeout value\n";
                     cleanup(sockfd, nullptr, toclean);
                     return 1;
@@ -494,6 +515,7 @@ int readRequest(){
                     return 1;
                 }
             }else{
+                printTime();
                 std::cerr << "ABORTING TRANSFER: server proposed different timeout\n";
                 cleanup(sockfd, nullptr, toclean);
                 return 1;
@@ -501,6 +523,7 @@ int readRequest(){
         }
         if (blocksize_i != -1){
             if (oackVals.blksize == ""){
+                printTime();
                 std::cout << "NOTICE: server refused blksize value, using default TFTPv2 value (512)\n";
                 blocksize_s = "512";
                 blocksize_i = 512;
@@ -508,10 +531,12 @@ int readRequest(){
                 try{
                     blocksize_i = std::stoll(blocksize_s);
                     if(oackVals.blksize != blocksize_s){
+                        printTime();
                         std::cout << "NOTICE: using blksize value proposed by server (" << blocksize_i << ")\n";
                     }
                     blocksize_s = oackVals.blksize;
                 }catch (...){
+                    printTime();
                     std::cerr << "ABORTING TRANSFER: responded with non numerical blksize value\n";
                     cleanup(sockfd, nullptr, toclean);
                     return 1;
@@ -525,6 +550,7 @@ int readRequest(){
             try{
                 tsize = std::stoull(oackVals.tsize);
             }catch (...){
+                printTime();
                 std::cerr << "ABORTING TRANSFER: server responded with non numerical tsize value\n";
                 cleanup(sockfd, nullptr, toclean);
                 return 1;
@@ -532,25 +558,52 @@ int readRequest(){
             std::filesystem::path p = "./";
             std::filesystem::space_info inf = std::filesystem::space(p);
             if (tsize > inf.capacity){
+                printTime();
                 std::cerr << "Not enough available storage\n";
-                exit(1);
+                cleanup(sockfd, nullptr, toclean);
+                return 1;
             }
             
         }
-    }else if(oackBuff[1] == 4){
+        if (multicast && oackVals.address == "" && oackVals.port == ""){
+            printTime();
+            std::cerr << "ABORTING TRANSFER: server does not support multicast\n";
+            cleanup(sockfd, nullptr, toclean);
+            return 1;
+        }
+    //in case server does not support option negotiation
+    }else if(oackBuff[1] == 3){
+        if (multicast){
+            printTime();
+            std::cerr << "ABORTING TRANSFER: server does not support multicast\n";
+            cleanup(sockfd, nullptr, toclean);
+            return 1;
+        }
+        printTime();
         std::cout << "NOTICE: server does not support option negotiation, using default TFTPv2 values\n";
         blocksize_i = 512;
         blocksize_s = "512";
+    //in case server refused options(s)
     }else if (oackBuff[1] == 8){
+        printTime();
         std::cerr << "ABORTING TRANSFER: (err code 8) - terminated by server due to option negotiation (" << &oackBuff[4] << ")\n";
         cleanup(sockfd, nullptr, toclean);
         return 1;
+    //in case of different error
     }else if (oackBuff[1] == 5){
+        printTime();
         std::cerr << "ABORTING TRANSFER: (err code 5) -" << &oackBuff[4] << "\n";
+        cleanup(sockfd, nullptr, toclean);
+        return 1;
+    //in case of unknown packet
+    }else{
+        printTime();
+        std::cerr << "ABORTING TRANSFER: Recieved unknown packet\n";
         cleanup(sockfd, nullptr, toclean);
         return 1;
     }
 
+    //multicast variables and code
     u_int yes = 1;
     struct sockaddr_in m4addr;
     struct ip_mreq mreq;
@@ -564,9 +617,14 @@ int readRequest(){
             cleanup(sockfd, nullptr, toclean);
             return 1;
         }
-        if (setsockopt(msock, SOL_SOCKET, SO_REUSEADDR, (char*) &yes, sizeof(yes)) < 0){
+        if (setsockopt(msock, SOL_SOCKET, SO_REUSEADDR, (char*) &yes, sizeof(yes)) < 0
+            ||
+            setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+            ||
+            setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+        ){
             printTime();
-            std::cerr << "ERROR: Address reuse failed\n";
+            std::cerr << "ERROR: Setting socket options failed\n";
             cleanup(sockfd, nullptr, toclean);
             close(msock);
             return 1;
@@ -604,7 +662,7 @@ int readRequest(){
     memset(tr_reply, 0, blocksize_i + 4);
     toclean[1] = tr_reply;
 
-    //ack
+    //ack buffer
     char* ack = (char*) malloc(4 * sizeof (char));
     toclean[2] = ack;
     ack[0] = 0;
@@ -638,6 +696,7 @@ int readRequest(){
             }
             //restransmission in case of none/incorrect ack
             if (rec == -1 || (ack[2] == tr_reply[2] && ack[3] == tr_reply[3])){
+                printTime();
                 std::cout << "NOTICE: block no. " << ackNum + 1 << " not recieved, retransmitting ack...\n";
                 if (multicast){
                     sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
@@ -650,6 +709,7 @@ int readRequest(){
                     sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
                 }
                 if (rec == -1 || ack[2] + 1 != tr_reply[2] || ack[3] + 1 != tr_reply[3]){
+                    printTime();
                     std::cerr << "ABORTING TRANSFER: connection interrupted\n";
                     cleanup(sockfd, cfile, toclean);
                     if (multicast){close(msock);}
@@ -754,6 +814,7 @@ int writeRequest(){
         return 1;
     }
 
+    //setting timeout
     struct timeval timeout;
     timeout.tv_sec = 3;
     timeout.tv_usec = 0;
@@ -780,7 +841,7 @@ int writeRequest(){
         sendto(sockfd, (const char *) req.message, req.size, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp6, sizeof(servaddrivp6));
     }
 
-    //OACK
+    //OACK buffer
     char* oackBuff = (char*) malloc((4 + 512)*sizeof(char));
     memset(oackBuff, 0, 516);
     char* toclean[3];
@@ -791,6 +852,7 @@ int writeRequest(){
     unsigned int adrlen = 0;
     int rec = 0;
 
+    //recieving OACK
     if (ipv4){
         adrlen = sizeof(servaddrivp4);
         rec = recvfrom(sockfd, oackBuff, 4+512 , 0, (struct sockaddr *)&servaddrivp4, &adrlen);
@@ -806,18 +868,22 @@ int writeRequest(){
         return 1;
     }
 
-    OACK oackVals;
     //parsing server reply
+    OACK oackVals;
+
+    //in case reply is OACK
     if (oackBuff[1] == 6){
 
         oackVals.parse(oackBuff, rec);
         if (timeout_i != -1){
             if (oackVals.timeout == ""){
+                printTime();
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
             }else if (oackVals.timeout == timeout_s){
                 try{
                     timeout.tv_sec = std::stoi(oackVals.timeout);
                 }catch (...){
+                    printTime();
                     std::cerr << "ABORTING TRANSFER: server responded with non numerical timeout value\n";
                     cleanup(sockfd, nullptr, toclean);
                     return 1;
@@ -833,6 +899,7 @@ int writeRequest(){
                     return 1;
                 }
             }else{
+                printTime();
                 std::cerr << "ABORTING TRANSFER: server proposed different timeout\n";
                 cleanup(sockfd, nullptr, toclean);
                 return 1;
@@ -840,6 +907,7 @@ int writeRequest(){
         }
         if (blocksize_i != -1){
             if (oackVals.blksize == ""){
+                printTime();
                 std::cout << "NOTICE: server refused blksize value, using default TFTPv2 value (512)\n";
                 blocksize_s = "512";
                 blocksize_i = 512;
@@ -847,10 +915,12 @@ int writeRequest(){
                 try{
                     blocksize_i = std::stoll(oackVals.blksize);
                     if(oackVals.blksize != blocksize_s){
+                        printTime();
                         std::cout << "NOTICE: using blksize value proposed by server (" << blocksize_i << ")\n";
                     }
                     blocksize_s = oackVals.blksize;
                 }catch (...){
+                    printTime();
                     std::cerr << "ABORTING TRANSFER: responded with non numerical blksize value\n";
                     cleanup(sockfd, nullptr, toclean);
                     return 1;
@@ -862,21 +932,34 @@ int writeRequest(){
         }
         if (oackVals.tsize != ""){
             if (oackVals.tsize != std::to_string(std::filesystem::file_size(path))){
+                printTime();
                 std::cerr << "ABORTING TRANSFER: server did not echo tsize correctly\n";
                 cleanup(sockfd, nullptr, toclean);
                 return 1;
             }
         }
+    //in case server does not support option negotiation
     }else if(oackBuff[1] == 4){
+        printTime();
         std::cout << "NOTICE: server does not support option negotiation, using default TFTPv2 values\n";
         blocksize_i = 512;
         blocksize_s = "512";
+    //in case server refused options(s)
     }else if (oackBuff[1] == 8){
+        printTime();
         std::cerr << "ABORTING TRANSFER: (err code 8) - terminated by server due to option negotiation (" << &oackBuff[4] << ")\n";
         cleanup(sockfd, nullptr, toclean);
         return 1;
+    //in case of different error
     }else if (oackBuff[1] == 5){
+        printTime();
         std::cerr << "ABORTING TRANSFER: (err code 5) -" << &oackBuff[4] << "\n";
+        cleanup(sockfd, nullptr, toclean);
+        return 1;
+    //in case of unknown packet
+    }else{
+        printTime();
+        std::cerr << "ABORTING TRANSFER: Recieved unknown packet\n";
         cleanup(sockfd, nullptr, toclean);
         return 1;
     }
@@ -890,7 +973,7 @@ int writeRequest(){
     toclean[1] = dataBlock;
     dataBlock[1] = 3;
 
-    //ack
+    //ack buffer
     char* ack = (char*) malloc(4 * sizeof (char));
     memset(ack, 0, 4);
     toclean[2] = ack;
@@ -912,6 +995,7 @@ int writeRequest(){
         }
         //restransmission in case of none/incorrect ack
         if (rec == -1 || ack[2] != dataBlock[2] || ack[3] != dataBlock[3]){
+            printTime();
             std::cout << "NOTICE: no ack for block " << (int) dataBlock[3] << " recieved, retransmitting...\n";
             if (ipv4){
                 sendto(sockfd, (const char *) dataBlock, num + 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
@@ -921,6 +1005,7 @@ int writeRequest(){
                 rec = recvfrom(sockfd, ack, 4, 0, (struct sockaddr *)&servaddrivp6, &adrlen);
             }
             if (rec == -1 || ack[2] != blockNum >> 8 || ack[3] != blockNum){
+                printTime();
                 std::cerr << "ABORTING TRANSFER: connection interrupted\n";
                 cleanup(sockfd, cfile, toclean);
                 return 1;
