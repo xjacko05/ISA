@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <ctime>
+#include <boost/algorithm/string.hpp>
 
 bool readON;
 std::filesystem::path path;
@@ -138,6 +139,7 @@ bool paramCheck(std::string arguments){
             }
         }else if (arg == "-c"){
             mode = value;
+            boost::algorithm::to_lower(mode);
             if (mode != "ascii" && mode != "netascii" && mode != "binary" && mode != "octet"){
                 std::cerr << "PARAM ERR: unknown mode\n";
                 return false;
@@ -173,8 +175,8 @@ bool paramCheck(std::string arguments){
         return false;
     }
 
-    if (multicast){
-        std::cerr << "Multicast not supported :(\n";
+    if (multicast && !ipv4){
+        std::cerr << "ipv6 Multicast not supported :(\n";
         return false;
     }
 
@@ -192,6 +194,9 @@ class Request{
             this->size = 2 + strlen(mode.c_str()) + 1 + strlen("blksize") + 1 + strlen(blocksize_s.c_str()) + 1;
             if (timeout_i != -1){
                 this->size += strlen("timeout") + 1 + strlen(timeout_s.c_str()) + 1;
+            }
+            if (multicast){
+                this->size += strlen("multicast") + 1;
             }
 
             std::string t_size;
@@ -235,6 +240,10 @@ class Request{
                 memcpy(&message[ptr++], timeout_s.c_str(), strlen(timeout_s.c_str()));
                 ptr += strlen(timeout_s.c_str());
             }
+            if (multicast){
+                memcpy(&message[ptr++], "multicast", strlen("multicast"));
+                ptr += strlen("multicast");
+            }
 
             memcpy(&message[ptr++], "tsize", strlen("tsize"));
             ptr += strlen("tsize");
@@ -264,12 +273,23 @@ class OACK{
         std::string blksize;
         std::string timeout;
         std::string tsize;
+        std::string address;
+        std::string port;
 
-        OACK(char* message, int rec){
+        void parse(char* message, int rec){
 
             blksize = "";
             timeout = "";
             tsize = "";
+            address = "";
+            port = "";
+
+            for (int i = 2; i != rec; i++){
+                //printf("%i\t%c\t%i\n", i, message[i], message[i]);
+                if (message[i] > 64 && message[i] < 91){
+                    message[i] += 32;
+                }
+            }
 
             for (int ptr = 2; ptr != rec;){
             if (!strcmp((char*)&message[ptr], "blksize")){
@@ -277,18 +297,28 @@ class OACK{
                 blksize = (char*)&message[ptr];
                 ptr += strlen((char*)&message[ptr]) + 1;
 
-            }
-            if (!strcmp((char*)&message[ptr], "timeout")){
+            }else if (!strcmp((char*)&message[ptr], "timeout")){
                 ptr += strlen("timeout") + 1;
                 timeout = (char*)&message[ptr];
                 ptr += strlen((char*)&message[ptr]) + 1;
 
-            }
-            if (!strcmp((char*)&message[ptr], "tsize")){
+            }else if (!strcmp((char*)&message[ptr], "tsize")){
                 ptr += strlen("tsize") + 1;
                 tsize = (char*)&message[ptr];
                 ptr += strlen((char*)&message[ptr]) + 1;
 
+            }else if (!strcmp((char*)&message[ptr], "multicast")){
+                ptr += strlen("multicast") + 1;
+                while (message[ptr] != ','){
+                    address += message[ptr++];
+                }
+                ptr += 1;
+                while (message[ptr] != ','){
+                    port += message[ptr++];
+                }
+                //ptr+=3;
+            }else{
+                ptr++;
             }
         }
     }
@@ -386,7 +416,16 @@ int readRequest(){
     struct timeval timeout;
     timeout.tv_sec = 3;
     timeout.tv_usec = 0;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+    if (
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+        ||
+        setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+    ){
+        printTime();
+        std::cerr << "ERROR: Socket options setting failed\n";
+        close(sockfd);
+        return 1;
+    }
 
     Request req;
 
@@ -429,9 +468,10 @@ int readRequest(){
     unsigned long long tsize = 0;
 
     //parsing server reply
+    OACK oackVals;
     if (oackBuff[1] == 6){
 
-        OACK oackVals(oackBuff, rec);
+        oackVals.parse(oackBuff, rec);
         if (timeout_i != -1){
             if (oackVals.timeout == ""){
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
@@ -443,8 +483,16 @@ int readRequest(){
                     cleanup(sockfd, nullptr, toclean);
                     return 1;
                 }
-                setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-                setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+                if(
+                    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+                    ||
+                    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+                ){
+                    printTime();
+                    std::cerr << "ERROR: Socket options setting failed\n";
+                    cleanup(sockfd, nullptr, toclean);
+                    return 1;
+                }
             }else{
                 std::cerr << "ABORTING TRANSFER: server proposed different timeout\n";
                 cleanup(sockfd, nullptr, toclean);
@@ -503,6 +551,52 @@ int readRequest(){
         return 1;
     }
 
+    u_int yes = 1;
+    struct sockaddr_in m4addr;
+    struct ip_mreq mreq;
+    int msock;
+    unsigned int m4len = 0;
+    if (multicast){
+        msock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (msock == -1){
+            printTime();
+            std::cerr << "ERROR: Socket creation failed\n";
+            cleanup(sockfd, nullptr, toclean);
+            return 1;
+        }
+        if (setsockopt(msock, SOL_SOCKET, SO_REUSEADDR, (char*) &yes, sizeof(yes)) < 0){
+            printTime();
+            std::cerr << "ERROR: Address reuse failed\n";
+            cleanup(sockfd, nullptr, toclean);
+            close(msock);
+            return 1;
+        }
+
+        memset(&m4addr, 0, sizeof(m4addr));
+        m4addr.sin_family = AF_INET;
+        m4addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        m4addr.sin_port = htons(std::stoi(oackVals.port));
+        m4len = sizeof(m4addr);
+
+        if (bind(msock, (struct sockaddr*) &m4addr, sizeof(m4addr)) < 0){
+            printTime();
+            std::cerr << "ERROR: Address binding failed\n";
+            cleanup(sockfd, nullptr, toclean);
+            close(msock);
+            return 1;
+        }
+
+        mreq.imr_multiaddr.s_addr = inet_addr(oackVals.address.c_str());
+        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (setsockopt(msock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*) &mreq, sizeof(mreq)) < 0){
+            printTime();
+            std::cerr << "ERROR: Joining multicast group failed\n";
+            cleanup(sockfd, nullptr, toclean);
+            close(msock);
+            return 1;
+        }
+    }
+
     unsigned long ackNum = 0;
     FILE* cfile = fopen(path.filename().c_str(), "wb+");
 
@@ -535,7 +629,9 @@ int readRequest(){
     //actual data transport
     if (oackBuff[1] == 6 || rec == blocksize_i + 4){
         do{
-            if(ipv4){
+            if (multicast){
+                rec = recvfrom(msock, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&m4addr, &m4len);
+            }else if(ipv4){
                 rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddrivp4, &adrlen);
             }else{
                 rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddrivp6, &adrlen);
@@ -543,7 +639,10 @@ int readRequest(){
             //restransmission in case of none/incorrect ack
             if (rec == -1 || (ack[2] == tr_reply[2] && ack[3] == tr_reply[3])){
                 std::cout << "NOTICE: block no. " << ackNum + 1 << " not recieved, retransmitting ack...\n";
-                if(ipv4){
+                if (multicast){
+                    sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
+                    rec = recvfrom(msock, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&m4addr, &m4len);
+                }else if(ipv4){
                     sendto(sockfd, (const char *) ack, 4, MSG_CONFIRM, (const struct sockaddr *) &servaddrivp4, sizeof(servaddrivp4));
                     rec = recvfrom(sockfd, tr_reply, 4+blocksize_i , 0, (struct sockaddr *)&servaddrivp4, &adrlen);
                 }else{
@@ -553,6 +652,7 @@ int readRequest(){
                 if (rec == -1 || ack[2] + 1 != tr_reply[2] || ack[3] + 1 != tr_reply[3]){
                     std::cerr << "ABORTING TRANSFER: connection interrupted\n";
                     cleanup(sockfd, cfile, toclean);
+                    if (multicast){close(msock);}
                     return 1;
                 }
             }
@@ -572,6 +672,7 @@ int readRequest(){
     std::cout << "Transport finished sucessfully\n";
 
     cleanup(sockfd, cfile, toclean);
+    if (multicast){close(msock);}
 
     return 0;
 }
@@ -656,8 +757,16 @@ int writeRequest(){
     struct timeval timeout;
     timeout.tv_sec = 3;
     timeout.tv_usec = 0;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+    if (
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+        ||
+        setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+    ){
+        printTime();
+        std::cerr << "ERROR: Socket options setting failed\n";
+        close(sockfd);
+        return 1;
+    }
 
     Request req;
 
@@ -697,10 +806,11 @@ int writeRequest(){
         return 1;
     }
 
+    OACK oackVals;
     //parsing server reply
     if (oackBuff[1] == 6){
 
-        OACK oackVals(oackBuff, rec);
+        oackVals.parse(oackBuff, rec);
         if (timeout_i != -1){
             if (oackVals.timeout == ""){
                 std::cout << "NOTICE: server refused timeout value, using default value\n";
@@ -712,8 +822,16 @@ int writeRequest(){
                     cleanup(sockfd, nullptr, toclean);
                     return 1;
                 }
-                setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
-                setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+                if (
+                    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+                    ||
+                    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout)) < 0
+                ){
+                    printTime();
+                    std::cerr << "ERROR: Socket options setting failed\n";
+                    cleanup(sockfd, nullptr, toclean);
+                    return 1;
+                }
             }else{
                 std::cerr << "ABORTING TRANSFER: server proposed different timeout\n";
                 cleanup(sockfd, nullptr, toclean);
